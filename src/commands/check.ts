@@ -1,11 +1,19 @@
-import { writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { existsSync, writeFileSync } from "node:fs";
+import { join, resolve, basename } from "node:path";
+import { buildVerdictStatement } from "../lib/attestation.js";
 import { analyze, findMissionRoot } from "../lib/mission.js";
-import { conformance, driftReport, unratifiedAdrs, decisionCoverage, ruleSignatures, GATED_DELIVERABLES } from "../lib/conformance.js";
-import { evidenceReport, verifyEvidenceLock, renderEvidenceLock, EVIDENCE_LOCK } from "../lib/evidence.js";
+import { decisionCoverage, rulesDir } from "../lib/conformance.js";
+import { GATE_NON_SCOPE, corpusStamp, corpusDrift } from "../lib/rules.js";
+import { buildSarif } from "../lib/sarif.js";
+import { buildVsaStatement } from "../lib/attestation.js";
+import { renderEvidenceLock, EVIDENCE_LOCK } from "../lib/evidence.js";
+import { conformanceRows, impliesStrict, isMachineRun, machinePayload, optionFault } from "../lib/check-contract.js";
+import { computeVerdict, verdictFrom, verdictSummaryParts } from "../lib/verdict.js";
+
 import { behavioralProof } from "../lib/behavioral-proof.js";
-import { verifyFindings, VERIFY_FINDINGS } from "../lib/verify-findings.js";
+import { verifyFindings, verifyFindingsPath } from "../lib/verify-findings.js";
 import { runHooks } from "../lib/hooks.js";
+import { verifyEvidenceLock } from "../lib/evidence.js";
 import { c, createHeader, generationDate, section, status } from "../lib/styles.js";
 import { VERSION } from "../lib/paths.js";
 
@@ -24,15 +32,30 @@ import { VERSION } from "../lib/paths.js";
  * so an agent drives on data, not scraped text — the exit-code contract is unchanged.
  * Exit codes: 0 = current gate clean, 1 = gaps, 2 = no mission found.
  */
-export async function checkCommand(opts: { path?: string; strict?: boolean; hooks?: boolean; coverage?: boolean; freeze?: boolean; json?: boolean }): Promise<void> {
-  if (opts.freeze) opts.strict = true; // a seal certifies a strict crossing
-  // In --json mode every human line is suppressed; the sole output is one JSON object at the end.
-  const log = (s = ""): void => { if (!opts.json) console.log(s); };
+export async function checkCommand(opts: { path?: string; strict?: boolean; hooks?: boolean; coverage?: boolean; freeze?: boolean; json?: boolean; through?: string; attest?: boolean; sarif?: boolean; vsa?: boolean; resourceUri?: string }): Promise<void> {
+  // The decisions live in check-contract.ts so a test can ask what a flag combination means without
+  // spawning a process and reading stderr (ADR-0047, finished 2026-08-24). This function keeps what
+  // only a command can do: print, and exit.
+  opts.strict = impliesStrict(opts);
+  const fault = optionFault(opts);
+  if (fault) {
+    console.error(status.error(fault.message));
+    process.exit(2);   // misuse, never 1 — a 1 would read as a failed gate
+  }
+  const machine = isMachineRun(opts);
+  const log = (s = ""): void => { if (!machine) console.log(s); };
 
   const root = findMissionRoot(resolve(process.cwd(), opts.path ?? "."));
   if (!root) {
+    // Only `--json` owns this shape. A consumer that asked for SARIF, a VSA or an in-toto statement
+    // was handed a JSON object that parses and is none of them — measured 2026-08-26: `--sarif`
+    // outside a mission emitted `{"verdict":"no-mission"}`, which a SARIF reader accepts as a
+    // document and then finds no runs in. Emitting NOTHING on stdout makes every parser fail loudly,
+    // which is the honest outcome when there is no verdict to render.
     if (opts.json) {
       process.stdout.write(JSON.stringify({ runward: VERSION, mission: null, verdict: "no-mission", exitCode: 2 }) + "\n");
+    } else if (machine) {
+      console.error(status.error("No runward/ mission found here or above. Run `runward init` first. (Nothing was written to stdout: there is no document to emit.)"));
     } else {
       console.error(status.error("No runward/ mission found here or above. Run `runward init` first."));
     }
@@ -59,6 +82,9 @@ export async function checkCommand(opts: { path?: string; strict?: boolean; hook
     "untouched": c.darkGray("○"),
     "missing": c.error("✗"),
   } as const;
+  // ADR-0051 paper cut: `in-progress` has TWO causes and this line named only one, so an operator
+  // whose file carries no placeholder was sent looking for something that was not there. The cause
+  // now comes from the verdict (computed by the same tests the state uses, never a second reading).
   const legendNote = {
     "filled": "",
     "in-progress": c.warning(" — placeholders remain"),
@@ -66,72 +92,256 @@ export async function checkCommand(opts: { path?: string; strict?: boolean; hook
     "missing": c.error(" — file missing"),
   } as const;
 
-  // Structured collectors for --json (ADR-0030) — populated alongside the human render.
-  const deliverablesData: Array<{ phase: string; artifact: string; relPath: string; state: string }> = [];
-  const conformanceData: Array<{ scope: string; rule: string; problem: string }> = [];
+  // ADR-0047: the verdict is computed in src/lib/verdict.ts, which a unit test can import. Nothing
+  // below re-decides anything — it renders `v` and, at the end, exits on `v.exitCode`. A second
+  // opinion here would be the defect, not a safety net.
+  const verdict = computeVerdict(mission, { strict: opts.strict, freeze: opts.freeze, hookFailed, through: opts.through });
+  // The ADR-0030 machine tables, derived from the verdict ONCE and never pushed beside the render.
+  // They were collectors populated inline as each section printed, which made them the one slice of
+  // the predicate nothing else could recompute — so `verify` took them on trust, and an invented
+  // `conformance` table verified (measured 2026-09-02). Derived here, BEFORE `--freeze` reassigns
+  // `verdict.seal`, so the payload states what this run judged, not what it wrote afterwards.
+  const deliverablesData = verdict.deliverables;
+  const conformanceData = opts.strict ? conformanceRows(verdict) : [];
+  const { gaps, strictGaps, checked } = verdict;
 
-  let gaps = 0;
   for (const phase of report.phases) {
     log(section(phase.spec.label));
-    for (const { artifact, state } of phase.artifacts) {
-      log(`  ${glyph[state]} ${c.white(artifact.label)} ${c.darkGray(`(runward/${artifact.relPath})`)}${legendNote[state]}`);
-      if (state !== "filled") gaps++;
-      deliverablesData.push({ phase: phase.spec.label, artifact: artifact.label, relPath: artifact.relPath, state });
+    for (const { artifact, state, cause } of phase.artifacts) {
+      const note = state === "in-progress"
+        ? c.warning(cause === "below-floor"
+          ? " — started, but too close to the template to count as filled"
+          : " — placeholders remain")
+        : legendNote[state];
+      log(`  ${glyph[state]} ${c.white(artifact.label)} ${c.darkGray(`(runward/${artifact.relPath})`)}${note}`);
     }
   }
 
-  let strictGaps = 0;
+  // ADR-0053: the declared-horizon banner, printed loud so a green prefix is never read as a
+  // completion. The verdict certifies phases up to `--through`; everything past it is deferred,
+  // named here and in the JSON, never conflated with "crossed".
+  if (verdict.horizon) {
+    const deferredPhases = [...new Set(verdict.horizon.deferred.map((r) => r.phase))];
+    log(section(`Construction horizon (--through ${verdict.through})`));
+    log(`  ${c.warning("◑")} ${c.white(`prefix verdict through ${verdict.through}`)}${c.darkGray(` — ${verdict.horizon.deferred.length} later deliverable(s) deferred; this is NOT a completion verdict.`)}`);
+    if (deferredPhases.length) log(`      ${c.darkGray("deferred: " + deferredPhases.join(", "))}`);
+    log(`  ${c.darkGray("The release / merge-to-main gate is always the full")} ${c.primary("runward check --strict")} ${c.darkGray("(no --through). This flag is a construction progress signal, never the sole required release check (ADR-0053).")}`);
+  }
+
   if (opts.strict) {
     log(section("Rule conformance (--strict)"));
-    let checked = 0;
-    const signatures = ruleSignatures(mission);
-    for (const { phase, deliverable, label } of GATED_DELIVERABLES) {
-      const { expected, violations } = conformance(mission, phase, deliverable);
-      // The evidence layer (ADR-0019/0020) and drift (blocking since ADR-0021) join the
-      // same verdict: a traced decision whose pointer is hollow or stale is a gap.
-      violations.push(...evidenceReport(mission, deliverable, signatures));
-      violations.push(...driftReport(mission, deliverable));
-      // Non-vacuity (ADR-0002): when no rules are currently mapped to a phase, conformance()
-      // still raises a `(mapping)` violation if the mapping was stripped below its pinned
-      // floor. Only skip when there is genuinely nothing to report — never discard that signal.
-      if (expected.length === 0 && violations.length === 0) continue;
-      checked++;
-      if (violations.length === 0) {
-        log(`  ${status.success(`${label}: ${expected.length} rule(s) accounted for`)}`);
-      } else {
-        for (const v of violations) {
-          log(`  ${c.error("✗")} ${c.darkGray(label + " · ")}${c.white(v.rule)}${c.darkGray(" — " + v.problem)}`);
-          conformanceData.push({ scope: label, rule: v.rule, problem: v.problem });
+    // ONE CAUSE, ONCE. On a mission where 36 rules are missing their row, this loop printed the
+    // same 41-word guidance 36 times — 71.6 % of the whole render was one repeated sentence, and
+    // everything else the gate had to say drowned in it (RWD-2026-0100). The DIAGNOSIS stays on
+    // every line; a guidance clause shared by three or more rows is spelled out once, under the
+    // lines it explains. The machine payload keeps the full sentence on every row (ADR-0030
+    // unchanged): a consumer reads rows one at a time, a human reads a screen at a time. Problems
+    // with no " — " clause are never elided — there would be nothing left to say once.
+    {
+      const freq = new Map<string, number>();
+      for (const g of verdict.gated) {
+        if (g.skipped) continue;
+        for (const v of g.violations) freq.set(v.problem, (freq.get(v.problem) ?? 0) + 1);
+      }
+      const elided: string[] = [...freq.keys()].filter((p) => (freq.get(p) ?? 0) >= 3 && p.includes(" — "));
+      for (const g of verdict.gated) {
+        if (g.skipped) continue;
+        if (g.violations.length === 0) {
+          log(`  ${status.success(`${g.label}: ${g.expectedCount} rule(s) accounted for`)}`);
+        } else {
+          for (const viol of g.violations) {
+            const brief = elided.includes(viol.problem) ? viol.problem.slice(0, viol.problem.indexOf(" — ")) : viol.problem;
+            log(`  ${c.error("✗")} ${c.darkGray(g.label + " · ")}${c.white(viol.rule)}${c.darkGray(" — " + brief)}`);
+          }
         }
-        strictGaps += violations.length;
+      }
+      for (const p of elided) {
+        log(`  ${c.darkGray(`↳ ${freq.get(p)} rule(s) above share one cause — ${p.slice(p.indexOf(" — ") + 3)}`)}`);
       }
     }
     if (checked === 0) log("  " + c.darkGray("no CRITICAL/HIGH rules mapped to a build phase"));
+    // The lines above read as though the critical set were covered. It is not: on the shipped corpus,
+    // 45 rules are CRITICAL or HIGH and 31 are mapped to a gated phase. The other 14 are never
+    // demanded, five of them CRITICAL. That is a scope decision and it is reported, never gated —
+    // turning it into a gap would red every honest mission on day one. Leaving it unsaid was the
+    // defect, because it let a reader believe a sentence the output never supported.
+    {
+      const cs = verdict.criticalScope;
+      if (cs.unmapped.length > 0) {
+        log(`  ${c.darkGray(`scope: ${cs.mapped} of ${cs.total} CRITICAL/HIGH rules are mapped to a gated phase. The other ${cs.unmapped.length} are never demanded by this gate:`)}`);
+        log(`      ${c.darkGray(cs.unmapped.slice(0, 6).join(", ") + (cs.unmapped.length > 6 ? `, … and ${cs.unmapped.length - 6} more (\`runward rules --json\`)` : ""))}`);
+      }
+    }
+
+    // The corpus the gate judges against belongs to the audited party. ADR-0002's floor is an
+    // invariant of CARDINALITY, so substitution and fabrication passed it untouched: an audit made
+    // this gate exit 0 on 36 rule files containing the word "ok". `scaffold-lock.json` already held
+    // the hash of every rule runward wrote; nothing read it here. Now the verdict does.
+    const corpus = verdict.corpus;
+    if (corpus.status === "verifiable" && (corpus.edited.length || corpus.missing.length || corpus.extra.length)) {
+      log(section("Rule corpus (--strict)"));
+      for (const f of corpus.missing) {
+        log(`  ${c.error("✗")} ${c.white(f)}${c.darkGray(" — a rule runward wrote is gone from runward/rules/. Restore it with")} ${c.primary("runward update")}${c.darkGray(".")}`);
+      }
+      for (const f of corpus.edited) {
+        log(`  ${c.error("✗")} ${c.white(f)}${c.darkGray(" — edited since runward wrote it (impact, phases or signature may no longer be the shipped ones). Restore it with")} ${c.primary("runward update --force")}${c.darkGray(" — plain")} ${c.primary("runward update")} ${c.darkGray("does not touch a file you changed, and leaves this red exactly as it is.")}`);
+      }
+      for (const f of corpus.extra) {
+        log(`  ${c.error("✗")} ${c.white(f)}${c.darkGray(" — a rule runward never wrote, declaring a gated phase at CRITICAL/HIGH: it would count toward the non-vacuity floor and stand in for a shipped rule. House rules are welcome; give them `phases: []` or a MEDIUM/LOW impact so they do not satisfy the gate on their own.")}`);
+        log(`      ${c.darkGray("Remove it from runward/rules/, or — if your organisation owns this rule — vendor your corpus with")} ${c.primary("runward update --corpus <path>")} ${c.darkGray("so the lock records it (ADR-0057). Measured: neither")} ${c.primary("runward update")} ${c.darkGray("nor")} ${c.primary("--force")} ${c.darkGray("clears this one.")}`);
+      }      log(`  ${c.darkGray("The gate judges your mission against this corpus. If the corpus moved, the verdict is about something else — each line above carries the gesture that clears it.")}`);
+    } else if (corpus.status === "unrecorded") {
+      log(section("Rule corpus (--strict)"));
+      log(`  ${c.error("✗")} ${c.white("(corpus)")}${c.darkGray(" — this mission keeps its own copy of the rules and carries no scaffold-lock.json, so the gate cannot check that corpus against what runward wrote: it would be judging your mission against rules it cannot vouch for. Run")} ${c.primary("runward update")} ${c.darkGray("once to record it, or remove")} ${c.primary("runward/rules/")} ${c.darkGray("to judge against the installed package instead.")}`);
+    }
+
+    // What the gate actually verified, on THIS mission (ADR-0040 applied per-run rather than in
+    // the abstract). Accepting prose is a decision, not a defect: an absence cannot be pointed at
+    // — "the CLI reads no secret at runtime" has no file to cite, and forcing a pointer there
+    // would manufacture the cited-not-applied this tool exists to catch. What WAS a defect is
+    // accepting it silently. A field report ran with 0 of 24 rows mechanically verified for
+    // months; the number was one line of arithmetic away and nobody printed it. The verdict is
+    // unchanged: this counts, it never gates.
+    const ev = verdict.breakdown;
+    // PRINTED UNCONDITIONALLY. It used to be gated on `applied > 0`, so a mission answering `n/a`
+    // to all 36 rules — the emptiest pass an audit could build — removed the only vacuity signal
+    // the product has. The worst case must not be the quietest.
+    {
+      log(section("What this gate verified"));
+      log(`  ${c.darkGray(`${ev.applied} applied · ${ev.deviated} deviated · ${ev.na} n/a`)}`);
+      if (ev.applied === 0 && ev.rows > 0) {
+        log(`  ${c.warning("!")} ${c.white("nothing was verified mechanically")}${c.darkGray(" — every row was answered by judgment or set aside. That can be legitimate; it is not a machine-checked gate.")}`);
+      }
+      const pct = ev.applied === 0 ? 0 : Math.round((ev.typed / ev.applied) * 100);
+      // The percentage is literally true and invites the opposite of the truth. Measured 2026-08-26:
+      // a mission with `code/` deleted and every row pointed at one of its own deliverables reads
+      // **100%**, while the honest shipped example reads 87% — the emptiest mission producing the
+      // most reassuring number, which is RWD-2026-0003's phenomenon exactly. Saying WHERE the
+      // checked pointers land costs one clause and removes the inference.
+      if (ev.applied > 0) {
+        const ef = ev.evidenceFiles;
+        const where = ef.total === 0 ? ""
+          : ef.external === 0 ? `, all ${ef.total} inside runward/`
+            : `, in ${ef.total} file(s) of which ${ef.external} outside runward/`;
+        log(`  ${c.white(String(ev.typed))} ${c.darkGray(`of ${ev.applied} \`applied\` row(s) carry a pointer the gate opened and checked`)} ${c.darkGray(`(${pct}%${where})`)}`);
+      }
+      // ADR-0051 decision 3: how many applied rows rest on a SIGNED rule — the gate checked the
+      // evidence's shape, not only that it exists. Counted, never gated. Most rules are unsigned by
+      // design (their text prescribes no token), so a low number here is expected, not a failure.
+      if (ev.applied > 0) log(`  ${c.white(String(ev.signed))} ${c.darkGray(`of ${ev.applied} \`applied\` row(s) rest on a signed rule — the gate checked the evidence's shape; for the others it verified the evidence exists, not its shape`)}`);
+      // ADR-0051 paper cut: counted, never gated (ADR-0004 intact). One artifact CAN legitimately
+      // evidence several rules — a threat model does cover more than one security rule. What this
+      // usually is, though, is a cell copied down a column while the rules underneath it differ, and
+      // the run used to say nothing at all. Naming it lets the operator confirm the reuse is
+      // deliberate; it never decides that for them.
+      if (ev.duplicated.length > 0) {
+        const n = ev.duplicated.reduce((t, d) => t + d.rules.length, 0);
+        // The census spans EVERY status since 2026-08-26 (evidence.ts measured 36 `deviated` rows
+        // citing one unrelated ADR going unnamed); this sentence still said `applied`, so the first
+        // strict run of a fresh mission printed "4 \`applied\` row(s) share" three lines under
+        // "0 applied" (RWD-2026-0098). The sentence now claims exactly what the census counts.
+        log(`  ${c.warning("!")} ${c.darkGray(`${n} row(s) share ${ev.duplicated.length} identical Evidence cell(s) — legitimate when one artifact really does evidence several rules, and worth a second look otherwise:`)}`);
+        for (const d of ev.duplicated.slice(0, 3)) {
+          log(`      ${c.darkGray(`${d.rules.map((r) => r.rule).join(", ")} → ${d.evidence.length > 70 ? d.evidence.slice(0, 69) + "…" : d.evidence}`)}`);
+        }
+        if (ev.duplicated.length > 3) log(`      ${c.darkGray(`+${ev.duplicated.length - 3} more — \`runward check --strict --json\` lists them all.`)}`);
+      }
+      // THE DISCLAIMER, not a refusal. ADR-0054 makes this a documentary gate and explicitly not a
+      // runtime, so a mission that cites only its own documents is legitimate — failing it would
+      // contradict the boundary the product declares. What it may not do is read like a substantive
+      // crossing. Measured 2026-08-26: delete `code/`, point every applied row at a deliverable, and
+      // the pass returned exit 0, verdict `clean`, `22 of 22 typed (100%)`, sealed six files and
+      // assembled an ISO 42001 pack — on a mission citing no code, no test and no ADR. The precedent
+      // followed here is ISA 705's disclaimer of opinion ("we do not express an opinion"), not
+      // pytest's exit 5 or Jest's `--passWithNoTests`: those refuse, and refusing contradicts
+      // ADR-0054. The vacuity itself is the one RWD-2026-0003 already named in this product — "the
+      // emptiest missions produced the most reassuring output".
+      if (ev.rows > 0 && ev.evidenceFiles.external === 0) {
+        log(`  ${c.warning("!")} ${c.white("no evidence outside runward/")} ${c.darkGray(`— all ${ev.evidenceFiles.total} file(s) this mission cites live inside the mission directory. The gate verified paperwork about paperwork: nothing here is bound to code, a test or a report. That is a legitimate state for a documentation-only mission and it is NOT a gap; it is also not what a green line usually means, so it is said rather than left to be inferred.`)}`);
+      }
+      // ADR-0066 disclosure, never gating (ADR-0060's shape): decided rows with no ratification
+      // trace. The solo operator who decided their own rows by hand is the legitimate path and
+      // pays nothing; an agent-built mission should show zero, and the armed tier may block on it.
+      // Chantier 7 disclosure, never gating today (blocking at the armed tier, ADR-0065): a rule
+      // that requires an evidence NATURE and an applied row that cites something else. The line
+      // exists so the difference between file:package.json and a dependency-analysis report is
+      // visible before it becomes refusable.
+      if (verdict.requiresUnmet.length > 0) {
+        log(`  ${c.warning("◑")} ${c.darkGray(`${verdict.requiresUnmet.length} applied row(s) do not carry the evidence nature their rule requires — disclosed today, refused at the armed tier (ADR-0065):`)}`);
+        for (const u of verdict.requiresUnmet.slice(0, 5)) log(`      ${c.darkGray(`${u.rule} requires ${u.requires} (${u.deliverable})`)}`);
+        if (verdict.requiresUnmet.length > 5) log(`      ${c.darkGray(`… and ${verdict.requiresUnmet.length - 5} more — \`runward check --strict --json\` lists them all.`)}`);
+      }
+      if (verdict.ratification.untraced > 0) {
+        log(`  ${c.warning("◑")} ${c.darkGray(`${verdict.ratification.untraced} decided row(s) carry no ratification trace — legitimate when you decided them yourself; an agent-built mission should show zero (disclosed, not judged — ADR-0060)`)}`);
+      }
+      // ADR-0067 (W3): the gate reads the workflow contracts. A broken promise is never a
+      // silence — every break is surfaced here; it COUNTS against the verdict only under the
+      // mission's hardening opt-in (the scaffold-lock `structureContract` flag, same switch as
+      // the deliverable structure: one opt-in, one posture).
+      {
+        const wc = verdict.workflowContract;
+        const breaks = wc.malformed.length + wc.joinBreaks.length + wc.unmetRequires.length;
+        if (breaks > 0) {
+          const tone = wc.gating ? c.error("✗") : c.warning("◑");
+          const posture = wc.gating ? "counted against the verdict (mission opt-in)" : "disclosed, not counted — the mission has not opted into contract hardening";
+          log(`  ${tone} ${c.white(`${breaks} workflow-contract break(s)`)} ${c.darkGray(`— ${posture} (ADR-0067):`)}`);
+          for (const m of wc.malformed.slice(0, 5)) log(`      ${c.darkGray(`malformed · ${m}`)}`);
+          for (const j of wc.joinBreaks.slice(0, 5)) log(`      ${c.darkGray(`join · ${j}`)}`);
+          for (const u of wc.unmetRequires.slice(0, 5)) log(`      ${c.darkGray(`requires · ${u}`)}`);
+          if (breaks > 15) log(`      ${c.darkGray(`… \`runward check --strict --json\` lists them all.`)}`);
+        }
+      }
+      if (ev.prose > 0) {
+        log(`  ${c.warning("!")} ${c.white(String(ev.prose))} ${c.darkGray("row(s) are prose: accepted on your judgment, never verified (ADR-0004)")}`);
+        for (const r of ev.proseRows.slice(0, 5)) log(`      ${c.darkGray(`${r.deliverable} · ${r.rule}`)}`);
+        if (ev.proseRows.length > 5) log(`      ${c.darkGray(`… and ${ev.proseRows.length - 5} more`)}`);
+        log(`  ${c.darkGray("Prose is legitimate where nothing can be pointed at. Everywhere else, a typed pointer turns a sentence into something CI re-opens on every push:")} ${c.primary("file:PATH[:LINE][#SYMBOL]")}${c.darkGray(", ")}${c.primary("test:PATH[::NAME]")}${c.darkGray(", ")}${c.primary("adr:NNNN")}${c.darkGray(".")}`);
+      }
+    }
     // Under --freeze the old seal is being replaced, not verified — otherwise a changed
     // sealed file would make re-sealing impossible (the seal violation reddens the gate
     // that freeze requires green). Everything else must still be green to seal.
-    const seal = opts.freeze ? { present: false, count: 0, violations: [] as ReturnType<typeof verifyEvidenceLock>["violations"] } : verifyEvidenceLock(mission);
-    if (seal.present) {
+    const seal = verdict.seal;
+    if (!seal.present) {
+      // An absent seal used to print NOTHING, and silence is the one thing this section must not
+      // do. Measured on 2026-08-21 against 0.36.0: seal a mission, tamper with a sealed evidence
+      // file, and the gate exits 1 — delete `runward/evidence-lock.json` and the SAME tampered tree
+      // exits 0, with no line anywhere saying a seal used to be there. A reader could not tell
+      // "never sealed" from "seal removed".
+      //
+      // This does not change the verdict, and deliberately so. Sealing is opt-in, so an absent lock
+      // is the honest default for most missions and must not redden them. The verdict-level fix
+      // would need an in-repository marker saying "this mission seals", and `scaffold-lock.ts`
+      // already records why that buys nothing: the lock is not the authority, it lives in the
+      // audited repository, and anyone deliberate re-signs it in the same commit while honest teams
+      // pay a red gate. Against a deliberate actor with commit rights the trust anchor is the
+      // reviewed commit (ADR-0021), where deleting this file is a visible diff. What the gate owes
+      // is to stop being silent about which regime it is in.
+      log(section("Evidence seal (--strict)"));
+      log(`  ${c.darkGray("no evidence seal — sealing is opt-in; `runward check --freeze` writes one. Nothing here is verified against a previous state.")}`);
+    } else {
       log(section("Evidence seal (--strict)"));
       if (seal.violations.length === 0) {
-        log(`  ${status.success(`seal intact — ${seal.count} evidence file(s), sealed ${seal.sealedAt ?? "?"}`)}`);
+        // `sealedAt` is DECLARED, not observed. The lock is a JSON file in the audited repository and
+        // nothing signs it: editing the date by hand yields "sealed 1999-12-31" with exit 0, verified
+        // 2026-08-08. `RUNWARD_NOW` reaches it too, but that is a detail — the date is unverifiable by
+        // construction, and hardening the env var would be theatre. What the seal proves is that the
+        // cited files still hash to what they hashed WHEN it was written; the "when" is the operator's
+        // word. Saying so where the date is printed is the only honest fix available.
+        log(`  ${status.success(`seal intact — ${seal.count} evidence file(s)`)}${c.darkGray(`, sealed ${seal.sealedAt ?? "?"} (date declared by the mission, not observed by the gate)`)}`);
       } else {
         for (const v of seal.violations) {
           log(`  ${c.error("✗")} ${c.white(v.rule)}${c.darkGray(" — " + v.problem)}`);
-          conformanceData.push({ scope: "evidence-seal", rule: v.rule, problem: v.problem });
         }
-        strictGaps += seal.violations.length;
       }
     }
-    const unratified = unratifiedAdrs(mission);
+    const unratified = verdict.unratified;
     if (unratified.length > 0) {
       log(section("Reconstruction lifecycle (--strict)"));
       for (const u of unratified) {
         log(`  ${c.error("✗")} ${c.white(u.file)}${c.darkGray(" — " + u.reason)}`);
-        conformanceData.push({ scope: "reconstruction", rule: u.file, problem: u.reason });
       }
       log("  " + c.darkGray("ratify each: write the real why + a re-evaluation trigger and set Status: accepted (rename DRAFT→ADR), or set Status: rejected and keep the file (a deleted DRAFT is re-proposed by the next --mine). A hypothesis is not a decision."));
-      strictGaps += unratified.length;
     }
     if (checked > 0 && strictGaps === 0) {
       // The two proofs, made legible together: this gate is the DOCUMENTARY proof (decisions traced);
@@ -153,13 +363,21 @@ export async function checkCommand(opts: { path?: string; strict?: boolean; hook
         log("  " + c.darkGray("advisory — runward reports presence and freshness, never runs or reads the result. You cross on both proofs."));
       }
       log(section("Semantic check (advisory, above the gate)"));
-      log("  " + c.darkGray("the gate proved every CRITICAL/HIGH rule was traced — not that the code applies it. Before you cross, run the verify workflow (runward/workflows/verify.md): an adversarial cite-vs-apply pass, ideally on a different model. Advisory, agent-executed, never blocks the gate (ADR-0007)."));
+      // RWD-2026-0103: this advice named runward/workflows/verify.md unconditionally, and the
+      // measured mission (this repository's own) holds no workflows/ directory — the gate sent
+      // the operator to a file that did not exist. The contract knows where the procedure lives
+      // (mission copy or package copy); the advice now says which, instead of assuming.
+      const verifyLives = existsSync(join(mission, "workflows", "verify.md"))
+        ? "runward/workflows/verify.md"
+        : "shipped with the package — `runward update` lays runward/workflows/ down in this mission";
+      log("  " + c.darkGray(`the gate proved every CRITICAL/HIGH rule was traced — not that the code applies it. Before you cross, run the verify workflow (${verifyLives}): an adversarial cite-vs-apply pass, ideally on a different model. Advisory, agent-executed, never blocks the gate (ADR-0007).`));
+      const vfPath = verifyFindingsPath(mission);
       const vf = verifyFindings(mission);
       if (!vf.present) {
-        log("  " + c.darkGray(`no verify findings recorded yet — the workflow writes them to runward/${VERIFY_FINDINGS}.`));
+        log("  " + c.darkGray(`no verify findings recorded yet — the workflow writes them to runward/${vfPath} (the path its contract declares).`));
       } else {
         const freshness = vf.fresh ? c.success(" · fresh") : c.warning(" · stale (a gated manifest changed since — re-run the verify workflow)");
-        log(`  ${c.success("✓")} ${c.darkGray("verify findings")} ${c.white(`runward/${VERIFY_FINDINGS}`)} ${c.darkGray(`(${vf.date})`)}${freshness}`);
+        log(`  ${c.success("✓")} ${c.darkGray("verify findings")} ${c.white(`runward/${vfPath}`)} ${c.darkGray(`(${vf.date})`)}${freshness}`);
         log("  " + c.darkGray("advisory — runward reports presence and freshness, never reads a verdict. The findings inform your crossing; they never gate it."));
       }
     }
@@ -185,19 +403,34 @@ export async function checkCommand(opts: { path?: string; strict?: boolean; hook
     }
   }
 
-  const clean = gaps === 0 && strictGaps === 0 && hookFailed === 0;
+  // Same arithmetic as computeVerdict, from the same function: the `after` hooks land after the
+  // reading, so the count is only final here. There is no second definition of "clean".
+  const { clean } = verdictFrom(gaps, strictGaps, hookFailed);
 
   log(section("Summary"));
   log(`  ${c.primaryBold("Current gate")}  ${c.white(report.currentPhase)}`);
   log(`  ${c.primaryBold("ADRs")}          ${c.white(String(report.adrCount))}${report.adrCount === 0 ? c.warning("  — no structural decision locked yet") : ""}`);
-  if (clean) {
+  if (clean && verdict.horizon) {
+    log("\n" + status.success(`In good standing through ${verdict.through}. ${verdict.horizon.deferred.length} later deliverable(s) remain — a construction checkpoint, not a completion verdict. Release stays behind the full \`runward check --strict\`.`));
+  } else if (clean) {
     log("\n" + status.success("All expected deliverables are filled. Cross gates on evidence, not on paperwork."));
   } else {
-    const parts: string[] = [];
-    if (gaps) parts.push(`${gaps} deliverable(s) not filled`);
-    if (strictGaps) parts.push(`${strictGaps} floor rule-conformance gap(s)`);
+    // NAME WHAT FAILED. `strictGaps` was rendered as "N floor rule-conformance gap(s)" whatever it
+    // counted, so a broken seal printed a rule-conformance gap in a phase that has none — measured
+    // 2026-08-26 — and the Next line below sent the operator to fill a deliverable when all of them
+    // were filled and none was named. A summary that misnames the failure is worse than no summary:
+    // it spends the operator's time on the wrong file.
+    const b = verdict.strictBreakdown;
+    // One naming arithmetic, shared with gate-hook's refusal (verdictSummaryParts) — hooks are
+    // this command's own flag, so their part is appended here, where hookFailed lives.
+    const parts = verdictSummaryParts(verdict);
     if (hookFailed) parts.push(`${hookFailed} hook(s) failed`);
-    log("\n" + status.warning(`${parts.join(" · ")}. No phase closes without its artifact — and, under --strict, without its CRITICAL/HIGH rules accounted for.`));
+    // The trailing clause is about deliverables and rules, so it only belongs when one of those is
+    // what failed. Printed under a seal drift it explained a rule nobody broke.
+    const clause = gaps || b.conformance
+      ? " No phase closes without its artifact — and, under --strict, without its CRITICAL/HIGH rules accounted for."
+      : "";
+    log("\n" + status.warning(`${parts.join(" · ")}.${clause}`));
     process.exitCode = 1;
   }
 
@@ -209,14 +442,36 @@ export async function checkCommand(opts: { path?: string; strict?: boolean; hook
       const sealedAt = generationDate();
       const content = renderEvidenceLock(mission, sealedAt);
       const count = Object.keys(JSON.parse(content).files).length;
-      if (process.env.RUNWARD_DRY_RUN === "1") {
+      // Sealing nothing produced `✓ sealed 0 evidence file(s)` and then `✓ seal intact — 0 file(s)`
+      // on every later run: rendered identically to a real seal, one number apart. A seal over an
+      // empty set certifies nothing and reads like certification, which is the worst pair.
+      if (count === 0) {
+        log("  " + status.error("refusing to seal zero files — nothing in this mission resolves to evidence, so there is nothing to freeze. A seal over an empty set reads like proof and is not."));
+        process.exitCode = 1;
+      } else if (process.env.RUNWARD_DRY_RUN === "1") {
         log("  " + c.darkGray(`dry-run — would seal ${count} evidence file(s) into runward/${EVIDENCE_LOCK}`));
       } else {
         writeFileSync(join(mission, EVIDENCE_LOCK), content);
+        // The machine payload is built from a verdict computed BEFORE this write, so `--freeze --json`
+        // reported `seal: {present: false, count: 0}` on the very pass that sealed — and the archived
+        // attestation recorded the mission as unsealed. Measured 2026-08-26: the same run printed
+        // `no evidence seal` and, seven lines below, `✓ sealed 29 evidence file(s)`. It under-declares
+        // rather than over-declares, so it fabricates no green — but a CI branching on that field
+        // concludes no seal exists immediately after creating one. Re-read the state we just wrote.
+        verdict.seal = verifyEvidenceLock(mission);
         log(`  ${status.success(`sealed ${count} evidence file(s) into runward/${EVIDENCE_LOCK} — commit it`)}`);
         log("  " + c.darkGray("a sealed file that later changes or disappears fails `check --strict` until you re-verify and re-seal."));
       }
     }
+  }
+
+  // ADR-0057: an ADVISORY corpus-pin drift — reported here, never a gap above. It cannot change the
+  // verdict (both stamps live in the audited repo, re-signable together); it names the honest mistake
+  // of bumping the pin without re-vendoring, so the operator re-runs `update --corpus`.
+  const drift = corpusDrift(mission, rulesDir(mission));
+  if (drift) {
+    log(section("Corpus pin"));
+    log(`  ${c.warning("advisory")} runward/rules holds ${c.white(`${drift.onDisk.name} v${drift.onDisk.version}`)} but the pin is ${c.white(`v${drift.pinned.version}`)} — re-vendor with ${c.primary("runward update --corpus <path>")} and apply migrations. ${c.darkGray("(advisory — never gates)")}`);
   }
 
   // Transmission surface: name the next gesture, so the operating agent can hand the human a decision.
@@ -224,25 +479,75 @@ export async function checkCommand(opts: { path?: string; strict?: boolean; hook
   if (clean) {
     log(`  Assemble the evidence pack with ${c.primary("runward compliance <regime>")} ${c.darkGray("(iso-42001 · nist-ai-rmf · eu-ai-act), or")} ${c.primary("runward status")} ${c.darkGray("for a handover snapshot.")}`);
   } else {
-    log(`  Fill the deliverable(s) named above, then re-run ${c.primary("runward check")}. ${c.primary("runward status")} ${c.darkGray("names exactly what is open at the current gate.")}`);
+    // The gesture has to match what actually failed. "Fill the deliverable(s) named above" was
+    // printed for a seal drift, with every deliverable filled and none named.
+    const b2 = verdict.strictBreakdown;
+    const gesture = gaps
+      ? `Fill the deliverable(s) named above, then re-run ${c.primary("runward check")}.`
+      : b2.seal
+        ? `Re-read the changed evidence, confirm it still holds, then re-seal with ${c.primary("runward check --freeze")}.`
+        : b2.corpus
+          ? `Reconcile the rule corpus named above — ${c.primary("runward update")} for a rule runward moved, ${c.primary("runward update --corpus <path>")} for one your organisation vendors.`
+          : b2.unratified
+            ? `Ratify the decision(s) named above, then re-run ${c.primary("runward check")}.`
+            : b2.conformance
+              ? `Close the rule-conformance gap(s) named above, then re-run ${c.primary("runward check")}.`
+              : `Re-run ${c.primary("runward check")}.`;
+    log(`  ${gesture} ${c.primary("runward status")} ${c.darkGray("names exactly what is open at the current gate.")}`);
   }
   log();
 
   // ── Machine contract (ADR-0030) ──────────────────────────────────────
   // One deterministic JSON object; the exit code (set above) stays the primary signal.
-  if (opts.json) {
-    const payload = {
-      runward: VERSION,
-      mission: root,
+  if (machine) {
+    // ADR-0030's contract is built in check-contract.ts, not here: it is what a CI or an agent
+    // branches on, and it could not be asserted without spawning the CLI (ADR-0047, finished
+    // 2026-08-24).
+    const payload = machinePayload(verdict, {
+      version: VERSION,
+      missionRoot: root,
       currentGate: report.currentPhase,
       adrCount: report.adrCount,
+      clean,
       strict: !!opts.strict,
-      verdict: clean ? "clean" : "gaps",
-      exitCode: clean ? 0 : 1,
-      gaps: { deliverables: gaps, conformance: strictGaps, hooks: hookFailed },
+      gaps,
+      strictGaps,
+      hookFailed,
       deliverables: deliverablesData,
-      ...(opts.strict ? { conformance: conformanceData } : {}),
-    };
-    process.stdout.write(JSON.stringify(payload, null, 2) + "\n");
+      conformance: conformanceData,
+      corpusPin: corpusStamp(rulesDir(mission)),
+      corpusDrift: corpusDrift(mission, rulesDir(mission)),
+      gateNonScope: GATE_NON_SCOPE,
+    });
+    if (opts.vsa) {
+      // The one runward emission that is not byte-idempotent unless the operator owns the clock:
+      // SOURCE_DATE_EPOCH (the reproducible-builds convention) keeps it identical, otherwise the
+      // wall clock is used. The VERDICT is unaffected — the timestamp is in the envelope, never in
+      // what was verified.
+      const epoch = process.env.SOURCE_DATE_EPOCH;
+      const secs = epoch !== undefined && /^\d+$/.test(epoch) ? Number(epoch) : null;
+      const timeVerified = new Date(secs !== null ? secs * 1000 : Date.now()).toISOString().replace(/\.\d{3}Z$/, "Z");
+      const statement = buildVsaStatement(root, mission, {
+        resourceUri: opts.resourceUri!, passed: clean, strict: !!opts.strict,
+        timeVerified, through: verdict.through ?? null,
+      });
+      process.stdout.write(JSON.stringify(statement, null, 2) + "\n");
+    } else if (opts.sarif) {
+      // ADR-0056 emission half. Deterministic, and independent of --strict: without it the log
+      // carries the deliverable gaps, with it the rule violations too — the same asymmetry the
+      // human output has, so the two never disagree.
+      process.stdout.write(JSON.stringify(buildSarif(mission, verdict, hookFailed), null, 2) + "\n");
+    } else if (opts.attest) {
+      // ADR-0055 layer 1: wrap the verdict in an UNSIGNED in-toto Statement. The predicate is the
+      // same payload with the machine-specific absolute mission path replaced by the mission's own
+      // name, so the attestation is portable; the subject digest (mission tree ∪ cited evidence)
+      // binds it to this exact state. No signature field: signing is the operator's opt-in step
+      // under their own key (layer 5).
+      const predicate = { ...payload, mission: basename(root) };
+      const statement = buildVerdictStatement(root, mission, predicate);
+      process.stdout.write(JSON.stringify(statement, null, 2) + "\n");
+    } else {
+      process.stdout.write(JSON.stringify(payload, null, 2) + "\n");
+    }
   }
 }

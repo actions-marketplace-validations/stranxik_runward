@@ -1,0 +1,142 @@
+// The structure contract's machinery (chantier 5, M1) — pure, inert, and precise about blame.
+//
+// The presence layer measures distance from the template, which is a floor against raw scaffolds
+// and not a bar against confident emptiness (the T2 ratchet holds the measured proof). This file
+// pins the machinery that will make a template's promises mechanical, BEFORE any template opts in:
+//   - each checker (section, typed field, closed domain, cross-file echo) fires in both
+//     directions;
+//   - the whole contract is INERT unless the mission's own scaffold-lock declares
+//     `"structureContract": true` — no existing mission moves an inch (the D3 default stays the
+//     author's open decision);
+//   - with an empty STRUCTURE registry, behavior is byte-identical to before M1 — proven by the
+//     untouched artifact-state suite beside this file.
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { structureViolations, structureContractOptIn, STRUCTURE } from "../../dist/lib/mission.js";
+
+const SPEC = {
+  sections: ["Problem", "Observable success criterion"],
+  fields: [{ name: "Date", shape: /^\d{4}-\d{2}-\d{2}$/, hint: "an ISO date (YYYY-MM-DD)" }],
+  domains: [{ section: "Definition of Ready check", column: 0, values: ["met", "risk", "missing"] }],
+  echoes: [{ fromSection: "Observable success criterion", inFile: "floor.md" }],
+};
+
+const DOC = (over = {}) => [
+  "# Framing", "",
+  `**Date**: ${over.date ?? "2026-09-03"}`, "",
+  "## Problem", "", "Forty emails a week, answered by hand.", "",
+  "## Observable success criterion", "",
+  over.criterion ?? "At least 60% of drafts sent unedited over two weeks.", "",
+  "## Definition of Ready check", "",
+  "| Condition | Status |", "|---|---|",
+  `| Real problem | ${over.status ?? "met"} |`,
+  "| Bracketed stays legal | [to assess] |", "",
+].join("\n");
+
+function mission(floorText) {
+  const dir = mkdtempSync(join(tmpdir(), "rw-struct-"));
+  writeFileSync(join(dir, "floor.md"), floorText);
+  return dir;
+}
+
+test("a complete document under the spec carries zero violations", () => {
+  const dir = mission("The floor proves: At least 60% of drafts sent unedited over two weeks.\n");
+  try {
+    assert.deepEqual(structureViolations(dir, DOC(), SPEC), []);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("each checker fires, and names what to fix", () => {
+  const dir = mission("nothing echoed here\n");
+  try {
+    const missing = structureViolations(dir, DOC().replace("## Problem", "## Trouble"), SPEC);
+    assert.ok(missing.some((v) => v.cause === "missing-section" && v.detail.includes('"Problem"')),
+      "a renamed section is a missing section, named");
+
+    const badDate = structureViolations(dir, DOC({ date: "next Tuesday" }), SPEC);
+    assert.ok(badDate.some((v) => v.cause === "invalid-field" && v.detail.includes("ISO date")),
+      "a field that does not parse under its shape is named with its hint");
+
+    const outOfDomain = structureViolations(dir, DOC({ status: "probably fine" }), SPEC);
+    assert.ok(outOfDomain.some((v) => v.cause === "row-out-of-domain" && v.detail.includes("met | risk | missing")),
+      "a table cell outside its closed domain is named with the domain");
+
+    const broken = structureViolations(dir, DOC(), SPEC);
+    assert.ok(broken.some((v) => v.cause === "broken-echo" && v.detail.includes("floor.md")),
+      "a criterion the floor does not echo verbatim is a broken echo");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("a bracketed cell is the template teaching its format, never out of domain", () => {
+  const dir = mission("At least 60% of drafts sent unedited over two weeks.\n");
+  try {
+    const v = structureViolations(dir, DOC(), SPEC).filter((x) => x.cause === "row-out-of-domain");
+    assert.deepEqual(v, [], "the [to assess] row stayed legal");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("the contract is inert without the mission's own opt-in declaration", () => {
+  const dir = mkdtempSync(join(tmpdir(), "rw-optin-"));
+  try {
+    assert.equal(structureContractOptIn(dir), false, "no lock, no contract");
+    writeFileSync(join(dir, "scaffold-lock.json"), JSON.stringify({ version: 1, files: {} }));
+    assert.equal(structureContractOptIn(dir), false, "a lock without the declaration is not an opt-in");
+    writeFileSync(join(dir, "scaffold-lock.json"), JSON.stringify({ version: 1, files: {}, structureContract: true }));
+    assert.equal(structureContractOptIn(dir), true, "the mission's committed declaration, nothing else");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("every STRUCTURE entry is a deliberate hardening — the inventory is exact", () => {
+  // Updated deliberately by M2, exactly as the M1 pin instructed: each of these three landed with
+  // its rewritten template, its example calibration and its T2 ratchet shrink in one commit.
+  assert.deepEqual(Object.keys(STRUCTURE).sort(),
+    ["architecture.md", "decision-matrix.md", "evaluation-rubric.md", "execution-topology.md", "floor.md",
+     "framing.md", "handover.md", "mission-contract.md", "observability-schema.md", "runbook.md", "threat-model.md"],
+    "a spec without its rewritten template and its T2 ratchet shrink is a hardening nobody calibrated");
+});
+
+// ── M4: the two directory artifacts, hardened behind the same opt-in ─────────────────────────────
+
+test("under the opt-in, an ADR without its date, status or trigger is not a decision", async () => {
+  const { isRealAdr } = await import("../../dist/lib/mission.js");
+  const dir = mkdtempSync(join(tmpdir(), "rw-m4adr-"));
+  try {
+    mkdirSync(join(dir, "adr"));
+    const good = "# ADR-0001: a decision\n\n**Date**: 2026-09-03\n**Status**: accepted\n\n## Context\n\n" +
+      "A real context long enough to clear the character floor. ".repeat(6) +
+      "\n\n## Reevaluation trigger (mandatory, dated)\n\nThe measured trigger that reopens this, set on 2026-09-03.\n";
+    writeFileSync(join(dir, "adr", "ADR-0001-good.md"), good);
+    writeFileSync(join(dir, "adr", "ADR-0002-no-trigger.md"), good.split("## Reevaluation trigger")[0]);
+    // without the opt-in: both pass the character floor, both are decisions (today's reading)
+    assert.equal(isRealAdr("ADR-0001-good.md", join(dir, "adr")), true);
+    assert.equal(isRealAdr("ADR-0002-no-trigger.md", join(dir, "adr")), true,
+      "without the opt-in nothing moves — no existing mission loses a decision overnight");
+    // with it: the three parsers finally gate what the template always taught
+    writeFileSync(join(dir, "scaffold-lock.json"), JSON.stringify({ version: 1, files: {}, structureContract: true }));
+    assert.equal(isRealAdr("ADR-0001-good.md", join(dir, "adr")), true, "a complete decision still counts");
+    assert.equal(isRealAdr("ADR-0002-no-trigger.md", join(dir, "adr")), false,
+      "a decision without its reevaluation trigger is a note, not a decision — the template's own word, now read");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("under the opt-in, a one-byte contract edit is in-progress, never filled", async () => {
+  const { artifactState } = await import("../../dist/lib/mission.js");
+  const { readFileSync: rf } = await import("node:fs");
+  const dir = mkdtempSync(join(tmpdir(), "rw-m4c-"));
+  try {
+    mkdirSync(join(dir, "contracts"));
+    const template = rf(join(process.cwd(), "templates", "mission", "port-contract.md"), "utf8");
+    writeFileSync(join(dir, "contracts", "model-port.md"), template.replace("## Business intent", "## Business intent.")); // the measured defect: one interior byte
+    const a = { label: "Port contracts", relPath: "contracts" };
+    assert.equal(artifactState(dir, a), "filled", "without the opt-in, today's reading holds");
+    writeFileSync(join(dir, "scaffold-lock.json"), JSON.stringify({ version: 1, files: {}, structureContract: true }));
+    assert.equal(artifactState(dir, a), "in-progress",
+      "one byte over the template is started work, never a filled contract");
+    writeFileSync(join(dir, "contracts", "model-port.md"),
+      "# Port Contract: ModelPort\n\n## Business intent\n\nreal\n\n## Signature\n\nreal\n\n## Invariants\n\nreal\n\n## Errors\n\nreal\n");
+    assert.equal(artifactState(dir, a), "filled", "the four-section skeleton is the shape of a contract");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

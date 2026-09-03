@@ -1,8 +1,11 @@
 ---
 title: Zod Input Validation
+phases: [floor]
+requires: junit
 impact: MEDIUM
 impactDescription: Prevents invalid data from entering the system and provides type safety
 tags: [quality, validation, security, typescript]
+noTerritory: Validation applies to every external input — endpoints, environment variables, third-party API responses, uploads, database reads — which reduces to no stable folder: it is a boundary discipline, not a file territory.
 ---
 
 ## Zod Input Validation

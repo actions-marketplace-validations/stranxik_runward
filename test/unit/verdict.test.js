@@ -1,0 +1,613 @@
+// The verdict itself: what turns a mission on disk into an exit code.
+//
+// Until 2026-08-06 this logic lived inside `src/commands/check.ts` and no unit test imported it.
+// Line coverage there was 8.70 per cent, function coverage zero, and the mutation pass of ADR-0046
+// could not measure it at all: mutating a file no test imports yields 100 per cent survivors, which
+// is noise and not a measurement. The project could therefore say "we measured what our net
+// catches" everywhere except where the verdict is decided, and that is the region the 22 false
+// positives of ADR-0045 lived in.
+//
+// So these cases pin the decision, not the rendering. `test/smoke.js` and `test/audit-corpus.js`
+// already drive the real CLI end to end; what neither can do is fail fast on a single term of the
+// arithmetic. Every guard below is exercised in BOTH directions, because a gate that refuses
+// everything passes a one-sided fixture just as well as a correct one.
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, appendFileSync, mkdirSync, cpSync, readdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, dirname } from "node:path";
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { renderEvidenceLock, EVIDENCE_LOCK } from "../../dist/lib/evidence.js";
+import { computeVerdict, verdictFrom } from "../../dist/lib/verdict.js";
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+const CLI = join(ROOT, "dist", "cli.js");
+
+// One reference mission, built once by the real CLI, then copied per case. `init --example` is the
+// mission the project ships as green; starting from a bare scaffold instead would make every case
+// red for reasons unrelated to what it tests, which is how a fixture stops proving anything.
+const REFERENCE = mkdtempSync(join(tmpdir(), "rw-verdict-ref-"));
+execFileSync(process.execPath, [CLI, "init", "--yes", "--example"], { cwd: REFERENCE, stdio: "pipe" });
+
+function mission() {
+  const dir = mkdtempSync(join(tmpdir(), "rw-verdict-"));
+  cpSync(REFERENCE, dir, { recursive: true });
+  return { dir, mission: join(dir, "runward"), drop: () => rmSync(dir, { recursive: true, force: true }) };
+}
+
+// ── The arithmetic ──────────────────────────────────────────────────────────────────────────────
+// `verdictFrom` is the single definition of "clean". It is exported precisely so the command cannot
+// grow a second copy at the bottom of the render, which is how two versions of one rule drift.
+
+test("all three counts at zero is the only clean verdict, and it exits 0", () => {
+  assert.deepEqual(verdictFrom(0, 0, 0), { clean: true, exitCode: 0 });
+});
+
+test("each term alone reddens the gate, and none of the three is decorative", () => {
+  // Written as three separate assertions on purpose: an `||` chain reduced to a single term still
+  // passes a test that only ever checks the sum.
+  assert.deepEqual(verdictFrom(1, 0, 0), { clean: false, exitCode: 1 }, "an unfilled deliverable must red");
+  assert.deepEqual(verdictFrom(0, 1, 0), { clean: false, exitCode: 1 }, "a strict gap must red");
+  assert.deepEqual(verdictFrom(0, 0, 1), { clean: false, exitCode: 1 }, "a failed hook must red");
+});
+
+test("a failed hook is not overruled by an otherwise perfect mission", () => {
+  // The operator's own check saying no. runward reports it; it never nets it out against its own
+  // findings.
+  assert.equal(verdictFrom(0, 0, 3).clean, false);
+});
+
+test("the exit code is 1, never the count of what went wrong", () => {
+  // 2 is reserved for "no mission found" and is decided before this function is reached. A gate
+  // that returned 7 for seven gaps would break every `if [ $? -eq 1 ]` in the wild.
+  assert.equal(verdictFrom(9, 9, 9).exitCode, 1);
+});
+
+// ── Deliverables gate with or without --strict ──────────────────────────────────────────────────
+
+test("the reference mission is clean under --strict, and exits 0", () => {
+  // The base case. Without it, every refusal below could be a broken fixture rather than a working
+  // guard, which is the failure this file exists to prevent elsewhere.
+  const m = mission();
+  const v = computeVerdict(m.mission, { strict: true });
+  assert.equal(v.gaps, 0, "no deliverable gap");
+  assert.equal(v.strictGaps, 0, `no strict gap, got: ${JSON.stringify(v.gated.flatMap((g) => g.violations).slice(0, 3))}`);
+  assert.equal(v.clean, true);
+  assert.equal(v.exitCode, 0);
+  m.drop();
+});
+
+test("a deliverable reverted to its raw template gates the phase, with or without --strict", () => {
+  // `gaps` is the one term that does not depend on --strict: a phase never closes without its
+  // artifact. Asserting both modes forbids moving this counter inside the strict branch.
+  const m = mission();
+  writeFileSync(join(m.mission, "framing.md"), readFileSync(join(ROOT, "templates", "mission", "framing.md")));
+  for (const strict of [false, true]) {
+    const v = computeVerdict(m.mission, { strict });
+    assert.ok(v.gaps > 0, `strict=${strict}: a raw template must count as a gap`);
+    assert.equal(v.exitCode, 1, `strict=${strict}: and must red the gate`);
+  }
+  m.drop();
+});
+
+test("every deliverable is reported, filled or not, and the row carries its state", () => {
+  // The `--json` contract (ADR-0030) is built from this list. A list that only carried failures
+  // would make an empty mission and a perfect one look alike to a machine.
+  const m = mission();
+  const v = computeVerdict(m.mission, { strict: true });
+  assert.ok(v.deliverables.length >= 10, `expected the full set, got ${v.deliverables.length}`);
+  assert.ok(v.deliverables.every((d) => d.phase && d.artifact && d.relPath && d.state));
+  assert.equal(v.deliverables.filter((d) => d.state !== "filled").length, v.gaps, "gaps must equal the non-filled rows");
+  m.drop();
+});
+
+// ── What --strict adds, term by term ────────────────────────────────────────────────────────────
+
+test("without --strict the strict readings are empty rather than absent, and cost nothing", () => {
+  // A consumer must never have to test which mode produced the object. Returning `undefined` here
+  // would push a null check into every caller, and a missed one reads as "no violations".
+  const m = mission();
+  const v = computeVerdict(m.mission, { strict: false });
+  assert.equal(v.strictGaps, 0);
+  assert.deepEqual(v.gated, []);
+  assert.equal(v.checked, 0);
+  assert.equal(v.seal.present, false);
+  assert.deepEqual(v.unratified, []);
+  m.drop();
+});
+
+test("a typed pointer that no longer opens is a strict gap, and only under --strict", () => {
+  // The evidence layer (ADR-0019) joined to the verdict. Non-strict must stay green on the same
+  // mission: that is the contract between the two modes, and a single-mode assertion would let the
+  // strict branch swallow the plain one.
+  const m = mission();
+  const f = join(m.mission, "architecture.md");
+  const before = readFileSync(f, "utf8");
+  const after = before.replace("file:code/src/core/ports/model-provider.port.ts#TriageModelPort",
+    "file:code/src/does-not-exist.ts#Nothing");
+  // Assert the fixture actually changed before believing anything about the verdict. A pattern that
+  // matches nothing produces a green run that looks like a passing test, which is how three
+  // mutation survivors were wrongly declared harmless on 2026-08-02.
+  assert.notEqual(after, before, "the fixture must really break a pointer");
+  writeFileSync(f, after);
+  assert.equal(computeVerdict(m.mission, { strict: false }).exitCode, 0, "plain mode does not read pointers");
+  const v = computeVerdict(m.mission, { strict: true });
+  assert.ok(v.strictGaps > 0, "a dead pointer must be a strict gap");
+  assert.equal(v.exitCode, 1);
+  m.drop();
+});
+
+test("every gated deliverable is examined on a shipped mission: the skip branch is unreachable there", () => {
+  // Measured on 2026-08-06, on BOTH shipped missions (`init --yes` and `init --yes --example`):
+  // five gated deliverables, five examined, zero skipped. The skip needs a deliverable with no
+  // expected rule AND no violation, and ADR-0002 pins every phase floor above zero, so stripping a
+  // mapping raises `(mapping)` instead of falling silent. The branch therefore cannot fire on any
+  // corpus runward ships.
+  //
+  // This test says exactly that, rather than fabricating a mission to reach the branch. It is
+  // written to break the day the claim stops holding: a shipped mission that skips a deliverable is
+  // either a floor set to zero or a mapping violation gone missing, and both deserve to be looked
+  // at rather than absorbed.
+  for (const args of [["init", "--yes"], ["init", "--yes", "--example"]]) {
+    const dir = mkdtempSync(join(tmpdir(), "rw-verdict-skip-"));
+    execFileSync(process.execPath, [CLI, ...args], { cwd: dir, stdio: "pipe" });
+    const v = computeVerdict(join(dir, "runward"), { strict: true });
+    assert.equal(v.gated.filter((g) => g.skipped).length, 0, `${args.join(" ")}: no deliverable may be skipped`);
+    assert.equal(v.checked, v.gated.length, `${args.join(" ")}: checked must count them all`);
+    assert.ok(v.checked > 0, `${args.join(" ")}: and there must be something to check`);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the corpus reaches the verdict on its own: an edited rule reddens a mission with nothing else wrong", () => {
+  // ADR-0045 class 1. The gate judges a mission against a corpus the mission OWNS, and an audit
+  // made it exit 0 on 36 rule files containing the word "ok": `update` read `scaffold-lock.json`,
+  // `check` did not.
+  //
+  // An EDIT rather than a removal, deliberately. Removing a rule also drops the phase below its
+  // ADR-0002 floor, so the mission reddens through the mapping violation and the test passes with
+  // the corpus contribution deleted. That is exactly the tautology this file is meant to avoid: the
+  // first version of this case survived `corpus contribution = 0`.
+  const m = mission();
+  const base = computeVerdict(m.mission, { strict: true });
+  assert.equal(base.strictGaps, 0, "the reference mission must start with nothing else wrong");
+  assert.equal(base.corpus.status, "verifiable", "and with a corpus the gate can check");
+
+  const rules = join(m.mission, "rules");
+  const victim = readdirSync(rules).find((f) => f.endsWith(".md"));
+  assert.ok(victim, "the mission keeps a local rule copy");
+  appendFileSync(join(rules, victim), "\nan edit runward did not write\n");
+
+  const v = computeVerdict(m.mission, { strict: true });
+  assert.deepEqual(v.corpus.edited, [victim], "the edited rule must be named");
+  assert.equal(v.strictGaps, 1, "and must be the ONLY thing in the verdict, which is what proves it counts");
+  assert.equal(v.exitCode, 1);
+  m.drop();
+});
+
+test("a mission whose corpus cannot be checked is refused, not merely warned about", () => {
+  // Found on 2026-08-06 against the published 0.33.0, while investigating something else entirely.
+  //
+  // `corpusDivergence` answers `unrecorded` when a mission keeps its own rule copy and carries no
+  // `scaffold-lock.json`. That state was a warning in the printed text and NOTHING in the verdict.
+  // But the lock lives in the audited repository, so "this mission predates the lock" is
+  // indistinguishable from "someone deleted the lock". Measured: 64 rule files reduced to the word
+  // "ok" exit 1 with the lock present and **exit 0** with the lock removed. ADR-0045 class 1,
+  // reopened by deleting one file the audited party owns, and `known-defects.md` called that class
+  // closed.
+  //
+  // Both directions are pinned below, because the fix must not punish the honest configurations:
+  // a mission with no local copy at all judges against the installed package and stays green.
+  const m = mission();
+  assert.equal(computeVerdict(m.mission, { strict: true }).exitCode, 0, "the reference mission starts green");
+
+  rmSync(join(m.mission, "scaffold-lock.json"), { force: true });
+  const v = computeVerdict(m.mission, { strict: true });
+  assert.equal(v.corpus.status, "unrecorded", "removing the lock must be seen");
+  assert.equal(v.strictGaps, 1, "and must be the ONLY thing in the verdict, which is what proves it counts");
+  assert.equal(v.exitCode, 1);
+
+  // The safest configuration there is: nothing local to edit, so nothing to vouch for.
+  rmSync(join(m.mission, "rules"), { recursive: true, force: true });
+  const w = computeVerdict(m.mission, { strict: true });
+  assert.equal(w.corpus.status, "package", "no local copy judges against the installed package");
+  assert.equal(w.exitCode, 0, "and must not be punished for it");
+  m.drop();
+});
+
+test("an unratified decision is a strict gap: a hypothesis is not a decision", () => {
+  const m = mission();
+  const adr = join(m.mission, "adr");
+  mkdirSync(adr, { recursive: true });
+  writeFileSync(join(adr, "DRAFT-0099-something.md"),
+    "# DRAFT-0099: something\n\n**Status**: proposed\n\n## Context\n\nA hypothesis.\n");
+  const v = computeVerdict(m.mission, { strict: true });
+  assert.ok(v.unratified.length > 0, "the draft must be named");
+  assert.ok(v.strictGaps >= v.unratified.length, "and must reach the verdict");
+  assert.equal(v.exitCode, 1);
+  m.drop();
+});
+
+// ── The seal ────────────────────────────────────────────────────────────────────────────────────
+// RWD-2026-0010: one field flipped in `verifyEvidenceLock` made a tampered sealed mission go from
+// exit 1 to exit 0, with the violations neither printed nor counted, and nothing reddened.
+
+test("a tampered seal reddens the gate", () => {
+  const m = mission();
+  execFileSync(process.execPath, [CLI, "check", "--freeze", "-p", "."], { cwd: m.dir, stdio: "pipe" });
+  assert.equal(computeVerdict(m.mission, { strict: true }).exitCode, 0, "a fresh seal must be intact");
+  appendFileSync(join(m.mission, "floor.md"), "\nan edit after sealing\n");
+  const v = computeVerdict(m.mission, { strict: true });
+  assert.equal(v.seal.present, true, "the seal must still be seen");
+  assert.ok(v.seal.violations.length > 0, "and its violations found");
+  assert.ok(v.strictGaps > 0, "and counted into the verdict");
+  assert.equal(v.exitCode, 1);
+  m.drop();
+});
+
+test("an unreadable seal reddens rather than being ignored", () => {
+  // The exact mutation that survived every net on 2026-08-05: `present: true` returned false on the
+  // unparseable-lock path, so `check.ts` skipped the whole section and a corrupted seal read as no
+  // seal at all.
+  const m = mission();
+  execFileSync(process.execPath, [CLI, "check", "--freeze", "-p", "."], { cwd: m.dir, stdio: "pipe" });
+  writeFileSync(join(m.mission, "evidence-lock.json"), "not json at all");
+  const v = computeVerdict(m.mission, { strict: true });
+  assert.equal(v.seal.present, true, "a corrupted lock is a seal that is present and broken, never an absent one");
+  assert.ok(v.strictGaps > 0);
+  assert.equal(v.exitCode, 1);
+  m.drop();
+});
+
+test("--freeze does not verify the seal it is about to replace", () => {
+  // Otherwise re-sealing is impossible: the changed file reddens the very gate freeze requires
+  // green. Everything else must still be checked, which is why this asserts the seal is skipped and
+  // NOT that the verdict is green.
+  const m = mission();
+  execFileSync(process.execPath, [CLI, "check", "--freeze", "-p", "."], { cwd: m.dir, stdio: "pipe" });
+  appendFileSync(join(m.mission, "floor.md"), "\nan edit after sealing\n");
+  assert.equal(computeVerdict(m.mission, { strict: true }).exitCode, 1, "without freeze the drift reddens");
+  const v = computeVerdict(m.mission, { strict: true, freeze: true });
+  assert.equal(v.seal.present, false, "under freeze the old seal is not read");
+  assert.equal(v.exitCode, 0, "and nothing else was wrong");
+  m.drop();
+});
+
+// ── Hooks reach the verdict without being run here ──────────────────────────────────────────────
+
+test("a hook failure passed in reddens an otherwise clean mission", () => {
+  // Hooks execute the operator's commands and stay in the command layer. Only the count crosses
+  // into the verdict, which is what makes this arithmetic testable without spawning anything.
+  const m = mission();
+  assert.equal(computeVerdict(m.mission, { strict: true }).exitCode, 0);
+  const v = computeVerdict(m.mission, { strict: true, hookFailed: 1 });
+  assert.equal(v.clean, false);
+  assert.equal(v.exitCode, 1);
+  m.drop();
+});
+
+test("computeVerdict runs nothing and writes nothing", () => {
+  // The module is a pure reading of the mission. If it ever grew a side effect, a caller could not
+  // ask it twice, and `runward status` and `runward check` would stop agreeing.
+  const m = mission();
+  const before = readdirSync(m.mission).sort().join("|");
+  const a = computeVerdict(m.mission, { strict: true });
+  const b = computeVerdict(m.mission, { strict: true });
+  assert.equal(readdirSync(m.mission).sort().join("|"), before, "no file may appear or vanish");
+  assert.deepEqual([a.gaps, a.strictGaps, a.exitCode], [b.gaps, b.strictGaps, b.exitCode], "same tree, same verdict");
+  m.drop();
+});
+
+test("the gate reports how much of the critical set it never asks about", () => {
+  // The conformance section prints "Architect: 6 rule(s) accounted for … Govern: 12" and stopped
+  // there, which reads as though the critical set were covered. Measured on the shipped corpus
+  // 2026-08-08: 45 rules are CRITICAL or HIGH and only 31 are mapped to a gated phase. Five of the
+  // fourteen others are CRITICAL, including the pre-production security and resilience checklists.
+  //
+  // Reported, never gated: a rule with `phases: []` is documentation the operator may apply without
+  // the gate asking, and turning it into a gap would red every honest mission on day one. Leaving it
+  // unsaid was the defect, because it let a reader believe a sentence the output never supported.
+  const m = mission();
+  const v = computeVerdict(m.mission, { strict: true });
+  assert.ok(v.criticalScope.total > 0, "the corpus has CRITICAL/HIGH rules");
+  assert.equal(v.criticalScope.mapped + v.criticalScope.unmapped.length, v.criticalScope.total,
+    "mapped + unmapped must account for the whole critical set");
+  // DELIBERATE UPDATE, 2026-09-03 (PR-R2): the 2026-08-08 measurement pinned here — 14 CRITICAL/HIGH
+  // rules unmapped, the pre-production security checklist among them — is the state the phase
+  // attachment closed. Every remaining unmapped rule now carries a `noPhase:` motive (the
+  // rules-phase-coverage guard refuses a silent third state), so "unmapped" means "declared
+  // no-phase by nature", never "nobody looked". The count is pinned exactly: a rule joining this
+  // list is a decision recorded in its own frontmatter, and this pin moves in the same commit.
+  assert.deepEqual(v.criticalScope.unmapped.sort(),
+    ["patterns-memory-router-tiered", "routing-model-cost-ratios", "routing-smart-complexity", "scaling-distributed-rate-limiting"],
+    "the unmapped CRITICAL/HIGH set moved — every member must carry a noPhase motive, and this pin moves deliberately with it");
+  assert.ok(!v.criticalScope.unmapped.includes("checklist-pre-production-security"),
+    "the pre-production security checklist is demanded at the govern gate since PR-R2 — it must never fall back out silently");
+  assert.equal(v.exitCode, 0, "and none of this gates: the reference mission stays green");
+  m.drop();
+});
+
+// ── The machine surface must not be quieter than the terminal ───────────────────────────────────
+
+test("`check --strict --json` carries what the terminal shows, and an empty mission is distinguishable", () => {
+  // Until 2026-08-08 the payload was strictly LESS informative than the text beside it: no counters,
+  // no corpus status, no seal. An agent driving on `--json` — which is how this tool is meant to be
+  // consumed, and how a CI reads it blind — could not tell a mission carrying real evidence from one
+  // answering `n/a` to every row. Both said `verdict: "clean"`.
+  //
+  // That inverts ADR-0045's own finding, one layer out: the worst case must not be the quietest.
+  // This spawns the real CLI rather than importing, because the payload is assembled in the command.
+  const m = mission();
+  const full = JSON.parse(execFileSync(process.execPath, [CLI, "check", "--strict", "--json", "-p", "."],
+    { cwd: m.dir, encoding: "utf8" }));
+
+  for (const k of ["evidence", "corpus", "seal", "criticalScope", "gateNonScope"]) {
+    assert.ok(k in full, `--strict --json must carry \`${k}\``);
+  }
+  assert.ok(full.evidence.rows > 0 && full.evidence.applied > 0, "the reference mission applies rows");
+  assert.equal(full.corpus.status, "verifiable");
+  assert.ok(full.gateNonScope.includes("It never proves the evidence truly implements"),
+    "the caveat travels with the counters, or a consumer keeps the numbers and drops it");
+
+  // Gut the mission: every row to `n/a`. The verdict stays clean by design (ADR-0004 accepts
+  // judgment), and that is exactly why the COUNTERS have to move — they are the only thing that
+  // separates the two missions for a reader that never sees the text.
+  for (const f of ["architecture.md", "floor.md"]) {
+    const p = join(m.mission, f);
+    const before = readFileSync(p, "utf8");
+    const after = before.replace(/^\| ([a-z0-9-]+) \| (applied|deviated) \|[^\n]*$/gm,
+      "| $1 | n/a | not applicable to this component |");
+    assert.notEqual(after, before, `${f}: the fixture must really change`);
+    writeFileSync(p, after);
+  }
+  const gutted = JSON.parse(execFileSync(process.execPath, [CLI, "check", "--strict", "--json", "-p", "."],
+    { cwd: m.dir, encoding: "utf8" }));
+  assert.ok(gutted.evidence.applied < full.evidence.applied,
+    `an emptied mission must report fewer applied rows (${gutted.evidence.applied} vs ${full.evidence.applied})`);
+  assert.ok(gutted.evidence.na > full.evidence.na, "and more n/a");
+
+  // Without --strict the strict-only readings stay absent: the contract is additive, not chatty.
+  const plain = JSON.parse(execFileSync(process.execPath, [CLI, "check", "--json", "-p", "."],
+    { cwd: m.dir, encoding: "utf8" }));
+  assert.ok(!("evidence" in plain), "plain mode reads no evidence, so it reports none");
+  m.drop();
+});
+
+// ── ADR-0053: the construction gate certifies a declared horizon ──────────────────────────────────
+// UX hole 1 of the 2026-08-12 product review: a required `check --strict` exits 1 for the whole
+// build (later phases are unfilled by definition), so it is unusable in CI during construction.
+// `--through <phase-id>` certifies a declared PREFIX. The load-bearing property is that it is a
+// FLOOR, not a ceiling: a regression at or below the horizon still reds, and the phase-global checks
+// (corpus, seal, unratified) are never scoped by it. Each case runs in both directions, because a
+// mode that greened everything would pass a one-sided fixture just as well as a correct one.
+
+const MTPL = (name) => readFileSync(join(ROOT, "templates", "mission", name));
+function revertToTemplate(m, rel, tpl) { writeFileSync(join(m.mission, rel), MTPL(tpl)); }
+/** Cross through floor, leave govern + handover raw: a genuine mid-construction state. */
+function midConstruction(m) {
+  revertToTemplate(m, "governance/threat-model.md", "threat-model.md");
+  revertToTemplate(m, "governance/evaluation-rubric.md", "evaluation-rubric.md");
+  revertToTemplate(m, "governance/observability-schema.md", "observability-schema.md");
+  revertToTemplate(m, "runbook.md", "runbook.md");
+  revertToTemplate(m, "handover.md", "handover.md");
+}
+
+test("ADR-0053: a declared horizon certifies the prefix while the full arc still reds (the UX-hole-1 case)", () => {
+  const m = mission();
+  midConstruction(m);
+
+  const whole = computeVerdict(m.mission, { strict: true });
+  assert.equal(whole.exitCode, 1, "the whole arc reds mid-construction");
+  assert.equal(whole.through, null, "no horizon declared without --through");
+
+  const floor = computeVerdict(m.mission, { strict: true, through: "floor" });
+  assert.equal(floor.exitCode, 0, "the prefix through floor is clean");
+  assert.equal(floor.clean, true);
+  assert.equal(floor.gaps, 0, "no gap at or below the horizon");
+  assert.equal(floor.through, "floor");
+  assert.ok(floor.deferredGaps > 0, "the deferred govern/handover gaps are counted, not hidden");
+  // A prefix green must be unreadable as mission-complete: the true whole-arc position is kept.
+  assert.notEqual(floor.report.currentPhase, "all gates passed", "currentGate still names the open phase");
+  assert.equal(floor.report.steadyState, false, "and steadyState stays false");
+  const deferredPhases = [...new Set(floor.horizon.deferred.map((r) => r.phase))];
+  assert.ok(deferredPhases.some((p) => /Govern/.test(p)), "govern is surfaced as deferred");
+  assert.ok(deferredPhases.some((p) => /Hand over/.test(p)), "handover is surfaced as deferred");
+
+  // A horizon the mission has not reached reds, honestly.
+  assert.equal(computeVerdict(m.mission, { strict: true, through: "govern" }).exitCode, 1,
+    "a horizon past the crossed prefix reds");
+  m.drop();
+});
+
+test("ADR-0053: the horizon is a floor — a regression at or below it still reds", () => {
+  const m = mission();
+  assert.equal(computeVerdict(m.mission, { strict: true, through: "floor" }).exitCode, 0, "clean prefix to start");
+  revertToTemplate(m, "architecture.md", "architecture.md"); // architect is below floor
+  assert.equal(computeVerdict(m.mission, { strict: true, through: "floor" }).exitCode, 1,
+    "a raw-template deliverable below the horizon reds the certified prefix");
+  m.drop();
+});
+
+test("ADR-0053: the phase-global corpus check is never scoped by the horizon", () => {
+  // ADR-0045 class 1: an edited rule reds at ANY horizon, including the earliest, even though no
+  // rule maps to the frame phase. The horizon narrows the phase counters, never the corpus.
+  const m = mission();
+  assert.equal(computeVerdict(m.mission, { strict: true, through: "frame" }).exitCode, 0, "clean at the earliest horizon");
+  const rules = join(m.mission, "rules");
+  const victim = readdirSync(rules).find((f) => f.endsWith(".md"));
+  assert.ok(victim, "the mission keeps a local rule copy");
+  appendFileSync(join(rules, victim), "\nan edit runward did not write\n");
+  assert.equal(computeVerdict(m.mission, { strict: true, through: "frame" }).exitCode, 1,
+    "a moved corpus reds at --through frame");
+  m.drop();
+});
+
+test("ADR-0053: an unratified decision reds at any horizon", () => {
+  const m = mission();
+  writeFileSync(join(m.mission, "adr", "DRAFT-0099-something.md"),
+    "# DRAFT-0099: something\n\n**Status**: proposed\n\n## Context\n\nA hypothesis.\n");
+  assert.equal(computeVerdict(m.mission, { strict: true, through: "frame" }).exitCode, 1,
+    "an unratified ADR reds even at the earliest horizon (the check is global)");
+  m.drop();
+});
+
+test("ADR-0053: a tampered seal reds below its own phase — the seal is global, not scoped", () => {
+  const m = mission();
+  execFileSync(process.execPath, [CLI, "check", "--freeze", "-p", "."], { cwd: m.dir, stdio: "pipe" });
+  assert.equal(computeVerdict(m.mission, { strict: true, through: "architect" }).exitCode, 0, "fresh seal, clean prefix");
+  appendFileSync(join(m.mission, "floor.md"), "\nan edit after sealing\n");
+  // floor.md sits in a phase ABOVE the architect horizon, yet the seal violation is global and reds.
+  assert.equal(computeVerdict(m.mission, { strict: true, through: "architect" }).exitCode, 1,
+    "the seal violation reds at a horizon that does not include the floor phase");
+  m.drop();
+});
+
+test("ADR-0053: topology folds onto architect — its manifest is judged at --through architect, never exempted", () => {
+  // ATTACK 6 of the design review: `topology` is a gated deliverable with no presence-phase-id, so a
+  // filter by raw phase-string would silently exempt execution-topology.md at every horizon. Break
+  // the topology manifest ALONE (a pointer), keep the file filled (no presence gap), and pin that it
+  // is deferred at frame but judged at architect AND at the full arc.
+  const m = mission();
+  const f = join(m.mission, "execution-topology.md");
+  const before = readFileSync(f, "utf8");
+  const after = before.replace("file:code/src/core/ports/routing.port.ts#RoutingPort",
+    "file:code/src/does-not-exist.ts#Nothing");
+  assert.notEqual(after, before, "the fixture must really break the topology pointer");
+  writeFileSync(f, after);
+
+  assert.equal(computeVerdict(m.mission, { strict: true, through: "frame" }).exitCode, 0,
+    "topology is deferred at --through frame (architect > frame)");
+  assert.equal(computeVerdict(m.mission, { strict: true, through: "architect" }).exitCode, 1,
+    "and judged at --through architect: the fold is a mapping, not an exemption");
+  assert.equal(computeVerdict(m.mission, { strict: true, through: "handover" }).exitCode, 1,
+    "and never exempt at the full arc");
+  m.drop();
+});
+
+test("ADR-0053: --through handover matches plain --strict on the exit code (identity), green and red", () => {
+  const m = mission();
+  const g1 = computeVerdict(m.mission, { strict: true });
+  const g2 = computeVerdict(m.mission, { strict: true, through: "handover" });
+  assert.equal(g2.exitCode, g1.exitCode, "green mission: same exit code");
+  assert.equal(g2.exitCode, 0);
+  revertToTemplate(m, "handover.md", "handover.md");
+  const r1 = computeVerdict(m.mission, { strict: true });
+  const r2 = computeVerdict(m.mission, { strict: true, through: "handover" });
+  assert.equal(r2.exitCode, r1.exitCode, "red mission: same exit code");
+  assert.equal(r2.exitCode, 1);
+  m.drop();
+});
+
+test("ADR-0053: unknown --through phase throws fail-loud, never a silent all-deferred green", () => {
+  // A missing id must never fall through to index -1, which would defer every phase and manufacture
+  // the exact false green the CLI's choices() validation exists to prevent.
+  const m = mission();
+  assert.throws(() => computeVerdict(m.mission, { strict: true, through: "nope" }), /unknown --through phase/);
+  m.drop();
+});
+
+test("ADR-0053: the CLI rejects an unknown phase-id and refuses --freeze, both as misuse (exit 2)", () => {
+  const m = mission();
+  const run = (args) => {
+    try { execFileSync(process.execPath, [CLI, ...args], { cwd: m.dir, stdio: "pipe" }); return 0; }
+    catch (e) { return e.status; }
+  };
+  assert.equal(run(["check", "--through", "bogus", "-p", "."]), 2, "an unknown phase-id is misuse");
+  assert.equal(run(["check", "--through", "floor", "--freeze", "-p", "."]), 2, "--through with --freeze is misuse");
+  assert.equal(run(["check", "--through", "floor", "-p", "."]), 0, "a valid horizon on the reference mission is clean");
+  m.drop();
+});
+
+test("ADR-0053: `--through --json` carries through/horizon/gaps.deferred, additive, whole-arc truth intact", () => {
+  const m = mission();
+  midConstruction(m);
+  // The JSON object is the payload whatever the exit code; a mid-construction plain run exits 1, so
+  // capture stdout regardless (the machine surface is the point, not the shell status here).
+  const jsonOut = (args) => {
+    try { return execFileSync(process.execPath, [CLI, ...args], { cwd: m.dir, encoding: "utf8" }); }
+    catch (e) { return e.stdout; }
+  };
+  const j = JSON.parse(jsonOut(["check", "--through", "floor", "--strict", "--json", "-p", "."]));
+  assert.equal(j.exitCode, 0, "prefix clean");
+  assert.equal(j.through, "floor");
+  assert.equal(j.horizon.phase, "floor");
+  assert.ok(j.gaps.deferred > 0, "deferred gaps carried in the counters");
+  assert.ok(j.horizon.deferred.length > 0, "deferred deliverables surfaced");
+  assert.notEqual(j.currentGate, "all gates passed", "currentGate keeps the whole-arc truth");
+  // Additive: a plain run carries through:null and horizon:null, no new field goes missing.
+  const p = JSON.parse(jsonOut(["check", "--json", "-p", "."]));
+  assert.equal(p.through, null, "through is null without --through");
+  assert.equal(p.horizon, null, "and horizon is null");
+  assert.equal(p.gaps.deferred, 0, "and gaps.deferred is 0 without a horizon");
+  m.drop();
+});
+
+process.on("exit", () => rmSync(REFERENCE, { recursive: true, force: true }));
+
+// ── The breakdown must account for the whole (2026-08-26 audit) ─────────────────────────────────
+// `strictGaps` was rendered as "N floor rule-conformance gap(s)" whatever it counted, so a broken
+// seal printed a rule-conformance gap in a phase that has none, and the Next line said "Fill the
+// deliverable(s) named above" with none named and every one of them filled. The operator was sent
+// to fix a file that was not wrong. The summary now names each class — and this test is why a new
+// contributor to the total cannot land unnamed.
+
+test("strictBreakdown sums to strictGaps, on a clean mission and on each failure class", () => {
+  const sum = (v) => v.strictBreakdown.conformance + v.strictBreakdown.corpus + v.strictBreakdown.seal + v.strictBreakdown.unratified;
+
+  const clean = mission();
+  const v0 = computeVerdict(clean.mission, { strict: true });
+  assert.equal(sum(v0), v0.strictGaps, "clean: the parts and the total are both zero");
+  assert.equal(v0.strictGaps, 0);
+  clean.drop();
+
+  // A broken CONFORMANCE row.
+  const c = mission();
+  const floor = join(c.mission, "floor.md");
+  writeFileSync(floor, readFileSync(floor, "utf8").replace(
+    /^\| config-secrets-boundary \| n\/a \|[^\n]*$/m,
+    "| config-secrets-boundary | applied | file:code/does-not-exist.ts |"));
+  const v1 = computeVerdict(c.mission, { strict: true });
+  assert.ok(v1.strictBreakdown.conformance > 0, "a broken pointer is a conformance gap");
+  assert.equal(v1.strictBreakdown.seal, 0, "and not a seal one");
+  assert.equal(sum(v1), v1.strictGaps, `parts ${JSON.stringify(v1.strictBreakdown)} must sum to ${v1.strictGaps}`);
+  c.drop();
+
+  // A broken SEAL: seal a clean mission, then change a sealed file.
+  const s = mission();
+  writeFileSync(join(s.mission, EVIDENCE_LOCK), renderEvidenceLock(s.mission, "2026-01-01"));
+  const sealed = Object.keys(JSON.parse(readFileSync(join(s.mission, EVIDENCE_LOCK), "utf8")).files ?? {});
+  assert.ok(sealed.length > 0, "the fixture seals something");
+  const target = join(s.dir, sealed[0]);
+  writeFileSync(target, readFileSync(target, "utf8") + "\n// changed after sealing\n");
+  const v2 = computeVerdict(s.mission, { strict: true });
+  assert.ok(v2.strictBreakdown.seal > 0, "a changed sealed file is a seal gap");
+  assert.equal(v2.strictBreakdown.conformance, 0, "and not a rule-conformance one — the defect this test exists for");
+  assert.equal(sum(v2), v2.strictGaps, `parts ${JSON.stringify(v2.strictBreakdown)} must sum to ${v2.strictGaps}`);
+  s.drop();
+});
+
+test("each corpus-drift case prescribes the command that actually clears it", () => {
+  // One remedy was printed for three cases: "Run `runward update` to restore it". Measured
+  // 2026-08-26 — `update` clears MISSING, only `--force` clears EDITED (plain `update` does not
+  // touch a file you changed and leaves the red exactly as it was), and NEITHER clears EXTRA.
+  // A prescription that does nothing is worse than none: the operator runs it, sees the same red,
+  // and concludes the gate is broken.
+  const run = (dir) => execFileSync("node", [CLI, "check", "--strict"], { cwd: dir, encoding: "utf8", env: { ...process.env, NO_COLOR: "1" } });
+  const out = (mutate) => {
+    const m = mission();
+    try { mutate(m); return run(m.dir); } catch (e) { return e.stdout ?? ""; } finally { m.drop(); }
+  };
+
+  const missing = out((m) => rmSync(join(m.mission, "rules", "hexa-architecture.md")));
+  assert.match(missing, /is gone from runward\/rules\/\. Restore it with runward update\./);
+
+  const edited = out((m) => appendFileSync(join(m.mission, "rules", "hexa-architecture.md"), "\n"));
+  assert.match(edited, /Restore it with runward update --force/, "the edited case must name --force");
+  assert.match(edited, /plain runward update does not touch a file you changed/, "and say why the obvious command does nothing");
+
+  const extra = out((m) => writeFileSync(join(m.mission, "rules", "house-rule.md"),
+    "---\ntitle: House rule\nimpact: HIGH\nphases: [floor]\nasi: []\n---\n\n## House\n\nA rule runward never wrote.\n"));
+  assert.match(extra, /Remove it from runward\/rules\/, or/, "the extra case is not fixed by any update");
+  assert.match(extra, /runward update --corpus <path>/, "and names the deliberate vendoring path (ADR-0057)");
+});

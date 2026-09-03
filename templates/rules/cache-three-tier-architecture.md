@@ -1,13 +1,15 @@
 ---
 title: Prompt Cache Stability (a Cost Lever, Provider-Specific)
+noPhase: A cost lever pulled once cost is measured, mid-iteration by nature — attaching it to a crossing phase would demand a caching row from missions that measured no cost problem, manufacturing n/a noise or premature optimisation
 impact: MEDIUM
 impactDescription: Cuts input-token cost when a provider bills cached prefixes cheaper, by keeping the stable part of the prompt byte-identical across requests
 tags: [cache, llm, cost, observability]
+noTerritory: This rule governs a property of the prompt assembled at call time — the byte-stability of its prefix across requests — not a class of files identifiable by path.
 ---
 
 ## Prompt Cache Stability
 
-This is a **cost lever, not an architecture principle.** Cost is driven first by the model boundary (keep deterministic work out of the model) and by routing; prompt caching is a secondary optimisation, and only where the provider bills a cached prefix cheaper than a fresh one. Reach for it once cost is measured and the prompt has a genuinely stable prefix, not before.
+This is a **cost lever, not an architecture principle.** (The slug `cache-three-tier-architecture` is historical — a slug is a manifest key and never rotates; the stance below supersedes the three-tier framing the name carries.) Cost is driven first by the model boundary (keep deterministic work out of the model) and by routing; prompt caching is a secondary optimisation, and only where the provider bills a cached prefix cheaper than a fresh one. Reach for it once cost is measured and the prompt has a genuinely stable prefix, not before.
 
 > **Cache stability beats token reduction.** A layer that varies between requests gets a 0% cache hit and costs more than the same layer sent stable. A 15K-token stable prefix at 90% hit is cheaper than a 10K-token prefix at 0%.
 

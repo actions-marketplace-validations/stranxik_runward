@@ -1,8 +1,10 @@
 ---
 title: Bi-Temporal Memory Invalidation (Contradicted Facts Are Dated, Not Deleted)
+phases: [floor]
 impact: MEDIUM
 impactDescription: Lets memory change its mind without lying about the past, by tracking when a fact was learned and when it was valid as two separate timelines
 tags: [data, memory, invalidation, bi-temporal, audit]
+noTerritory: It imposes a bi-temporal shape on facts and two distinct queries over them — a property of the data model, not a class of files locatable by path.
 ---
 
 ## Bi-Temporal Memory Invalidation

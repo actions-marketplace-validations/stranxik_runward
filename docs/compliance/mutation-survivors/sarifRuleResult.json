@@ -1,0 +1,51 @@
+{
+ "function": "sarifRuleResult",
+ "probeMissions": [],
+ "verdicts": [
+  {
+   "key": "48|56|48|58|ArrayDeclaration|[\"Stryker was here\"]",
+   "line": 48,
+   "mutator": "ArrayDeclaration",
+   "filing": "equivalent",
+   "evidence": "The sentinel replaces [] only when `runs` is not an array; iterating it yields a string element whose `?.tool` is undefined, so no rule and no result is seen and the verdict stays \"absent\". Byte-identical over 645 calls on 43 documents, including runs:null, runs as an object, and an object-shaped runs carrying error-level findings.",
+   "argument": "The sentinel replaces [] only when `runs` is not an array; iterating it yields a string element whose `?.tool` is undefined, so no rule and no result is seen and the verdict stays \"absent\". Byte-identical over 645 calls on 43 documents, including runs:null, runs as an object, and an object-shaped runs carrying error-level findings.",
+   "stableKey": "tool-adapters\u0001sarifRuleResult\u0001ArrayDeclaration\u0001[\"Stryker was here\"]\u0001[]\u0001const runs = Array.isArray(log?.runs) ? log.runs : [];"
+  },
+  {
+   "key": "53|89|53|91|ArrayDeclaration|[\"Stryker was here\"]",
+   "line": 53,
+   "mutator": "ArrayDeclaration",
+   "filing": "equivalent",
+   "evidence": "The sentinel replaces [] only when `driver.rules` is not an array; the string element has no `.id`, so `rules.find` never matches and `rules[res.rule.index]?.id` stays undefined. Byte-identical over 645 calls, including a log whose `rules` is an object AND whose result points at rule index 0.",
+   "argument": "The sentinel replaces [] only when `driver.rules` is not an array; the string element has no `.id`, so `rules.find` never matches and `rules[res.rule.index]?.id` stays undefined. Byte-identical over 645 calls, including a log whose `rules` is an object AND whose result points at rule index 0.",
+   "stableKey": "tool-adapters\u0001sarifRuleResult\u0001ArrayDeclaration\u0001[\"Stryker was here\"]\u0001[]\u0001const rules = Array.isArray(run?.tool?.driver?.rules) ? run.tool.driver.rules : [];"
+  },
+  {
+   "key": "57|69|57|71|ArrayDeclaration|[\"Stryker was here\"]",
+   "line": 57,
+   "mutator": "ArrayDeclaration",
+   "filing": "equivalent",
+   "evidence": "The sentinel replaces [] only when `run.results` is not an array; the string element has no `.ruleId`, so id is undefined and the loop continues for any string ruleId. Byte-identical over 645 calls, including results:null and results shaped as an object carrying an error-level finding.",
+   "argument": "The sentinel replaces [] only when `run.results` is not an array; the string element has no `.ruleId`, so id is undefined and the loop continues for any string ruleId. Byte-identical over 645 calls, including results:null and results shaped as an object carrying an error-level finding.",
+   "stableKey": "tool-adapters\u0001sarifRuleResult\u0001ArrayDeclaration\u0001[\"Stryker was here\"]\u0001[]\u0001const results = Array.isArray(run?.results) ? run.results : [];"
+  },
+  {
+   "key": "64|27|64|37|OptionalChaining|res.level",
+   "line": 64,
+   "mutator": "OptionalChaining",
+   "filing": "equivalent",
+   "evidence": "645 sarifRuleResult calls over 43 SARIF documents (null and primitive result entries included) were byte-identical. The line is reached only after `if (id !== ruleId) continue`, and for a string ruleId a null or primitive `res` yields id === undefined, so `res` is always an object there; both callers (evidence.ts, spec-conformance.ts) pass a string behind a `p.symbol !== undefined` guard.",
+   "argument": "645 sarifRuleResult calls over 43 SARIF documents (null and primitive result entries included) were byte-identical. The line is reached only after `if (id !== ruleId) continue`, and for a string ruleId a null or primitive `res` yields id === undefined, so `res` is always an object there; both callers (evidence.ts, spec-conformance.ts) pass a string behind a `p.symbol !== undefined` guard.",
+   "stableKey": "tool-adapters\u0001sarifRuleResult\u0001OptionalChaining\u0001res.level\u0001res?.level\u0001const level = res?.level ?? meta?.defaultConfiguration?.level ?? \"warning\";"
+  },
+  {
+   "key": "64|78|64|87|StringLiteral|\"\"",
+   "line": 64,
+   "mutator": "StringLiteral",
+   "filing": "equivalent",
+   "evidence": "The literal's only use is `level !== \"note\" && level !== \"none\"`, and \"\" satisfies both comparisons exactly like \"warning\". Measured byte-identical over 645 calls on 43 documents, including logs where the default fires (result with no level, rule with no defaultConfiguration).",
+   "argument": "The literal's only use is `level !== \"note\" && level !== \"none\"`, and \"\" satisfies both comparisons exactly like \"warning\". Measured byte-identical over 645 calls on 43 documents, including logs where the default fires (result with no level, rule with no defaultConfiguration).",
+   "stableKey": "tool-adapters\u0001sarifRuleResult\u0001StringLiteral\u0001\"\"\u0001\"warning\"\u0001const level = res?.level ?? meta?.defaultConfiguration?.level ?? \"warning\";"
+  }
+ ]
+}

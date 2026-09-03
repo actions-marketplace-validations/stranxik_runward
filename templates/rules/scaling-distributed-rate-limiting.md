@@ -1,9 +1,11 @@
 ---
 title: Distributed Rate Limiting
+noPhase: Applies only at the multi-instance switch, which is an iteration trigger traced by an ADR — before that switch a mission has nothing honest to point at
 impact: HIGH
 asi: [ASI08, ASI10]
 impactDescription: Enables consistent rate limiting across multiple instances
 tags: [scaling, rate-limiting, redis, architecture]
+noTerritory: The rule constrains where the counter lives — shared across instances, never in-process — a property of every path that counts a request rather than a class of files.
 ---
 
 ## Distributed Rate Limiting
@@ -88,7 +90,7 @@ async function rateLimitMiddleware(req: Request, res: Response, next: NextFuncti
   const result = await checkRateLimit(`user:${userId}`);
 
   // Set standard rate limit headers
-  res.setHeader('X-RateLimit-Limit', config.maxRequests);
+  res.setHeader('X-RateLimit-Limit', defaultConfig.maxRequests);
   res.setHeader('X-RateLimit-Remaining', result.remaining);
   res.setHeader('X-RateLimit-Reset', Math.ceil(Date.now() / 1000 + result.resetIn / 1000));
 

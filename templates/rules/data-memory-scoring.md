@@ -1,8 +1,10 @@
 ---
 title: Memory Scoring Formula
+noPhase: A reference formula, a starting point to recalibrate against real traffic — it informs a design, it is not a crossing requirement; data-memory-consolidation carries the gated half of this family
 impact: MEDIUM
 impactDescription: Provides optimal memory retrieval ranking
 tags: [data, memory, scoring, algorithm]
+noTerritory: It is a reference formula to recalibrate against real traffic, applying wherever a memory retrieval score is computed, with no file artifact of its own.
 ---
 
 ## Memory Scoring Formula

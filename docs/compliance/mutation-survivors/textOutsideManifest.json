@@ -1,0 +1,126 @@
+{
+ "function": "textOutsideManifest",
+ "probeMissions": [],
+ "verdicts": [
+  {
+   "key": "524|15|524|17|StringLiteral|\"Stryker was here!\"",
+   "line": 524,
+   "mutator": "StringLiteral",
+   "filing": "equivalent",
+   "evidence": "Applied by scripts/mutation-probe-strict.mjs on nine missions (the self-gate plus /tmp/tom-A … /tmp/tom-I): every run returned a byte-identical `check --json --strict` payload — e.g. tom-B exit 1 / 4713 bytes, tom-D exit 0 / 4375 bytes, tom-F exit 1 / 4965 bytes, tom-H exit 1 / 0 bytes. Ledgers: reports/mutation/probe-mission-{A..I}.jsonl. Also applied by hand on tom-B (scratchpad/apply.mjs): `mutants 1: status 1 · exit 1 conformance 1 · 4713 bytes`, character-for-character the pristine line. The same harness DOES see this function's return value change — it caught mutants #5 and #11 as exit-code flips on the same missions — so the null result is a measurement, not a blind spot.",
+   "argument": "`raw` is assigned unconditionally as the first statement of the `try`. The only path that skips that assignment is a throw inside `readFileSync`, and the `catch` returns a literal without ever reading `raw`. No read of `raw` can therefore observe its initialiser: the initialiser is dead on every path, for every file and every mission, independently of any reachability argument about the caller.",
+   "stableKey": "evidence\u0001textOutsideManifest\u0001StringLiteral\u0001\"Stryker was here!\"\u0001\"\"\u0001let raw = \"\";"
+  },
+  {
+   "key": "529|16|529|18|StringLiteral|\"Stryker was here!\"",
+   "line": 529,
+   "mutator": "StringLiteral",
+   "filing": "equivalent",
+   "evidence": "Identical payload on all nine missions, including /tmp/tom-H (deliverable `chmod 000`), where pristine and mutant alike produce 0 bytes of stdout and `✗ EACCES: permission denied, open '/tmp/tom-H/runward/floor.md'` — the gate stops before any row is parsed, so this catch is not the code that handles an unreadable deliverable. Hand-applied on tom-B: `mutants 3: status 1 · exit 1 conformance 1 · 4713 bytes`, identical to pristine. Ledgers: reports/mutation/probe-mission-{A..I}.jsonl.",
+   "argument": "The `catch` cannot be entered on any call this code can receive. `textOutsideManifest` is called only from `circularEvidence`, only when `abs === self`, i.e. on the deliverable whose rows `evidenceReport` is iterating — and `evidenceReport` obtained those rows from an UNGUARDED `readFileSync(join(missionDir, deliverable), \"utf8\")` a few statements earlier, in the same process, on the same inode. A file that cannot be read there yields no rows, no pointer and no call; a file that can be read there is still readable microseconds later. So `readFileSync(abs)` inside this function cannot throw. This is a CALLER-COUPLED equivalence: it holds because of where the function is called from, not because of what the function does. It would become live the day `textOutsideManifest` is called on a path the caller has not already read. Unlike mutant `363|11|365|6|BlockStatement|{}`, this one has NO second line of defence: if the catch were ever entered it would return `\"Stryker was here!\"`, and `outside.includes(symbol)` would then green any pointer whose symbol is a substring of that string (`#\"was here\"`, `#Stryker`). The filing therefore rests entirely on the unreachability above, and it is the one verdict in this set that a refactor of the caller would invalidate.",
+   "stableKey": "evidence\u0001textOutsideManifest\u0001StringLiteral\u0001\"Stryker was here!\"\u0001\"\"\u0001return \"\";"
+  },
+  {
+   "line": 535,
+   "mutator": "Regex",
+   "filing": "hole",
+   "evidence": "FALSE GREEN. Dropping the caret makes the fence test 'contains a fence opener anywhere', so one sentence that MENTIONS a fence opens one; every following line, including the real conformance heading, is recorded as fenced, the section is never excluded, and the slug is found in the very row that claims it. m4-inline-backticks: pristine exit 1/gaps/conformance 1; mutant exit 0/clean/conformance 0. This mutant is IDENTICAL on m2, m3, m12 and m14 (documents whose only fence lines are real delimiters), which is why a mission with an inline mention had to be built. Self-gate identical. Battery: 6 of 102, all six instruments on m4 including the freeze lock bytes and sha256.",
+   "caughtBy": null,
+   "mission": "m4-inline-backticks",
+   "key": "535|13|535|28|Regex|/\\s*(```|~~~)/",
+   "stableKey": "evidence\u0001textOutsideManifest\u0001Regex\u0001/\\s*(```|~~~)/\u0001/^\\s*(```|~~~)/\u0001if (/^\\s*(```|~~~)/.test(line)) {"
+  },
+  {
+   "line": 535,
+   "mutator": "Regex",
+   "filing": "hole",
+   "evidence": "FALSE GREEN in BOTH directions. The mutant lets a non-space prefix precede the fence opener while refusing leading whitespace. m4-inline-backticks: pristine exit 1/gaps/conformance 1, mutant exit 0/clean/conformance 0 — an inline mention opens a fence. m2-fence-in-section (indented fence): pristine exit 1, mutant exit 0 — the indented fence stops being one. Discriminator measured: on m3 (same illustration, column-0 fence) this mutant is IDENTICAL, exit 1 both sides, while the other five fence mutants all flip there; the difference is exactly the indentation. On m12 it also produces a FALSE RED: pristine exit 0/clean, mutant exit 1 with 1 gap on the symbol living in the indented illustration. Self-gate identical. Battery: 18 of 102.",
+   "caughtBy": null,
+   "mission": "m4-inline-backticks (also m2, m12)",
+   "key": "535|13|535|28|Regex|/^\\S*(```|~~~)/",
+   "stableKey": "evidence\u0001textOutsideManifest\u0001Regex\u0001/^\\S*(```|~~~)/\u0001/^\\s*(```|~~~)/\u0001if (/^\\s*(```|~~~)/.test(line)) {"
+  },
+  {
+   "line": 536,
+   "mutator": "BooleanLiteral",
+   "filing": "equivalent",
+   "evidence": "The value written is the fenced flag of the fence DELIMITER line itself. Battery: IDENTICAL on all 102 observations, including four missions built to make delimiter lines load-bearing — m2 and m3 (a fenced heading inside the conformance section), m14 (tilde delimiters, a delimiter whose info string is heading-like, and a heading line immediately after an opening fence) and m12 (a column-0 and an indented illustration, each containing a full conformance heading). Argument: fenced[i] is read only by heading(i) = !fenced[i] && /^#{1,6}\\s/.test(lines[i]); this literal is written only for lines matching the fence test, whose first non-blank characters are backticks or tildes, so a hash is never at column 0 for exactly those lines and the second conjunct is false whatever the flag says. The push count is unchanged, so no index shifts. The same battery DOES see this function move — 14 of the 17 mutants here move on it — and on m2 and m14 its immediate neighbours one line above and one line below BOTH flip the exit code in both directions, so the null reading is a measurement, not a blind spot in the fixture.",
+   "caughtBy": null,
+   "mission": "battery of 17 missions, no movement anywhere",
+   "argument": "fenced[i] is read only by heading(i) = !fenced[i] && /^#{1,6}\\s/.test(lines[i]); this literal is written only for lines matching the fence test, whose first non-blank characters are backticks or tildes, so a hash is never at column 0 for exactly those lines and the second conjunct is false whatever the flag says. The push count is unchanged, so no index shifts. The same battery DOES see this function move — 14 of the 17 mutants here move on it — and on m2 and m14 its immediate neighbours one line above and one line below BOTH flip the exit code in both directions, so the null reading is a measurement, not a blind spot in the fixture.",
+   "key": "536|25|536|29|BooleanLiteral|false",
+   "stableKey": "evidence\u0001textOutsideManifest\u0001BooleanLiteral\u0001false\u0001true\u0001fenced.push(true);"
+  },
+  {
+   "line": 542,
+   "mutator": "Regex",
+   "filing": "hole",
+   "evidence": "FALSE GREEN. Unanchored, the test makes any line CONTAINING a hash-then-space a heading, so the walk ends on an ordinary prose line and every row below it — the whole table — is kept in the text circularEvidence searches. A '# 42' in an evidence cell or a note is enough. m6-hash-in-section (a prose line with '# 3' and '# 4' between the heading and the table; readManifest skips it because it does not start with a pipe, so all six rows are still read): pristine exit 1/gaps/conformance 1; mutant exit 0/clean/conformance 0. Self-gate identical. Battery: 6 of 102, all six instruments on m6 including the freeze lock bytes and sha256.",
+   "caughtBy": null,
+   "mission": "m6-hash-in-section",
+   "key": "542|42|542|53|Regex|/#{1,6}\\s/",
+   "stableKey": "evidence\u0001textOutsideManifest\u0001Regex\u0001/#{1,6}\\s/\u0001/^#{1,6}\\s/\u0001const heading = (i) => !fenced[i] && /^#{1,6}\\s/.test(lines[i]);"
+  },
+  {
+   "line": 543,
+   "mutator": "ArrayDeclaration",
+   "filing": "hole",
+   "evidence": "FALSE GREEN. Unlike the register's equivalent Stryker cases, this literal is not decoration: `keep` is the haystack of outside.includes(symbol), so seeding it greens every self-citation whose symbol is a substring of the seeded string. m8-stryker (the row cites the symbol Stryker, which appears nowhere else in the deliverable): pristine exit 1/gaps/conformance 1; mutant exit 0/clean/conformance 0. Self-gate identical. Battery: 6 of 102, all six instruments on m8 including the freeze lock bytes and sha256.",
+   "caughtBy": null,
+   "mission": "m8-stryker",
+   "key": "543|18|543|20|ArrayDeclaration|[\"Stryker was here\"]",
+   "stableKey": "evidence\u0001textOutsideManifest\u0001ArrayDeclaration\u0001[\"Stryker was here\"]\u0001[]\u0001const keep = [];"
+  },
+  {
+   "line": 545,
+   "mutator": "Regex",
+   "filing": "hole",
+   "evidence": "FALSE RED. Unanchored, the title test fires on any heading that MENTIONS the table, so a second section is excluded and the fact it states disappears from the text the self-citation is checked against. m10-unanchored-title (the terminating heading rewritten to mention the Rule conformance table mid-sentence, its prose carrying the cited symbol): pristine exit 0/clean/conformance 0; mutant exit 1/gaps/conformance 1 on that pointer. Self-gate identical. Battery: 6 of 102, all six instruments on m10 including the freeze lock bytes and sha256.",
+   "caughtBy": null,
+   "mission": "m10-unanchored-title",
+   "key": "545|27|545|56|Regex|/#{1,6}\\s+Rule conformance/i",
+   "stableKey": "evidence\u0001textOutsideManifest\u0001Regex\u0001/#{1,6}\\s+Rule conformance/i\u0001/^#{1,6}\\s+Rule conformance/i\u0001if (heading(i) && /^#{1,6}\\s+Rule conformance/i.test(lines[i])) {"
+  },
+  {
+   "line": 545,
+   "mutator": "Regex",
+   "filing": "hole",
+   "evidence": "FALSE GREEN. Collapsing \\s+ to \\s means one stray space in the heading stops the section being excluded, and the universal green key works again — while the manifest itself is still parsed, so nothing else in the gate notices. m5-two-space-head (the heading written with two spaces; readManifest uses \\s+ and still finds the table, so all six rows are read): pristine exit 1/gaps/conformance 1; mutant exit 0/clean/conformance 0. Self-gate identical. Battery: 6 of 102, all six instruments on m5 including the freeze lock bytes and sha256.",
+   "caughtBy": null,
+   "mission": "m5-two-space-head",
+   "key": "545|27|545|56|Regex|/^#{1,6}\\sRule conformance/i",
+   "stableKey": "evidence\u0001textOutsideManifest\u0001Regex\u0001/^#{1,6}\\sRule conformance/i\u0001/^#{1,6}\\s+Rule conformance/i\u0001if (heading(i) && /^#{1,6}\\s+Rule conformance/i.test(lines[i])) {"
+  },
+  {
+   "line": 547,
+   "mutator": "EqualityOperator",
+   "filing": "equivalent",
+   "evidence": "The inner walk differs from pristine only when the excluded section runs to end-of-file. Pristine leaves the loop at i = lines.length, then the decrement and the outer increment land back on lines.length and the outer loop ends. The mutant walks one further — the heading test is false because the line is undefined — then the decrement and the outer increment land on lines.length+1 and the outer loop ends there. Neither path pushes another line, so keep is identical array-for-array; in every other case the walk stops on a real heading and the two are the same expression. Battery: IDENTICAL on all 102 observations, including the four EOF and edge missions m13, m15 (no trailing newline), m16 and m17 (empty keep). The same battery DOES see this function move: 14 of the 17 mutants here move on it.",
+   "caughtBy": null,
+   "mission": "battery of 17 missions, no movement anywhere",
+   "argument": "The inner walk differs from pristine only when the excluded section runs to end-of-file. Pristine leaves the loop at i = lines.length, then the decrement and the outer increment land back on lines.length and the outer loop ends. The mutant walks one further — the heading test is false because the line is undefined — then the decrement and the outer increment land on lines.length+1 and the outer loop ends there. Neither path pushes another line, so keep is identical array-for-array; in every other case the walk stops on a real heading and the two are the same expression. Battery: IDENTICAL on all 102 observations, including the four EOF and edge missions m13, m15 (no trailing newline), m16 and m17 (empty keep). The same battery DOES see this function move: 14 of the 17 mutants here move on it.",
+   "key": "547|20|547|36|EqualityOperator|i <= lines.length",
+   "stableKey": "evidence\u0001textOutsideManifest\u0001EqualityOperator\u0001i <= lines.length\u0001i < lines.length\u0001while (i < lines.length && !heading(i))"
+  },
+  {
+   "line": 549,
+   "mutator": "UpdateOperator",
+   "filing": "hole",
+   "evidence": "FALSE RED. An increment instead of a decrement means the outer loop's own increment skips PAST the heading that terminated the section, so that heading and the line after it are dropped from the kept text — two lines of the deliverable silently unavailable as evidence. m9-terminating-heading (the heading that ends the conformance section carries the cited symbol): pristine exit 0/clean/conformance 0; mutant exit 1/gaps/conformance 1 on that pointer. Self-gate identical. Battery: 6 of 102, all six instruments on m9 including the freeze lock bytes and sha256.",
+   "caughtBy": null,
+   "mission": "m9-terminating-heading",
+   "key": "549|13|549|16|UpdateOperator|i++",
+   "stableKey": "evidence\u0001textOutsideManifest\u0001UpdateOperator\u0001i++\u0001i--\u0001i--; // the loop's own i++ lands on the next heading"
+  },
+  {
+   "line": 576,
+   "mutator": "StringLiteral",
+   "filing": "hole",
+   "evidence": "FALSE GREEN. Joining with the empty string welds every line to the next and manufactures symbols that no line contains. It is a one-way weakening: concatenation can only ADD matches to outside.includes(symbol), never remove one, so it can only ever turn a refusal into a pass. m7-boundary (two prose lines above the table, the first ending in 'guardFields' and the second starting with 'Legacy', so the cited symbol guardFieldsLegacy exists in the file only inside the excluded table and, in prose, only across the line break): pristine exit 1/gaps/conformance 1; mutant exit 0/clean/conformance 0. Self-gate identical. Battery: 6 of 102, all six instruments on m7 including the freeze lock bytes and sha256.",
+   "caughtBy": null,
+   "mission": "m7-boundary",
+   "key": "576|22|576|26|StringLiteral|\"\"",
+   "stableKey": "evidence\u0001textOutsideManifest\u0001StringLiteral\u0001\"\"\u0001\"\\n\"\u0001return keep.join(\"\\n\");"
+  }
+ ]
+}

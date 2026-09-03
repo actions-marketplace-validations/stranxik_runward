@@ -1,8 +1,10 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { analyze, findMissionRoot, isRealAdr, readReopeningTriggers } from "../lib/mission.js";
+import { territoryCoverage } from "../lib/characterize.js";
 import { c, createHeader, section } from "../lib/styles.js";
 import { VERSION, WORKFLOWS } from "../lib/paths.js";
+import { readWorkflowContracts, producesGateJoin } from "../lib/workflow-contract.js";
 
 /** Mission snapshot: phase progress, decision journal, activity, workflows —
  *  a transmission-ready "where the mission stands", read-only from the mission files. */
@@ -61,7 +63,7 @@ export async function statusCommand(opts: { path?: string }): Promise<void> {
   console.log(section("Decision journal"));
   const adrDir = join(mission, "adr");
   const adrs = existsSync(adrDir)
-    ? readdirSync(adrDir).filter(isRealAdr).sort()
+    ? readdirSync(adrDir).filter((f) => isRealAdr(f, adrDir)).sort()
     : [];
   if (adrs.length === 0) {
     console.log(c.darkGray("  no ADR yet — every structural decision must be locked"));
@@ -104,6 +106,28 @@ export async function statusCommand(opts: { path?: string }): Promise<void> {
     if (triggers.length > 0) console.log(c.darkGray("  triggers shown, not judged — you decide if one has fired."));
   }
 
+  // Territory coverage (ADR-0043). This lives here, and not in `characterize`, because that
+  // command tells a governed mission it is the wrong command before running anyway, and writes a
+  // characterization.md that is not a mission deliverable. The anti-rot instrument has to be
+  // reachable by the mission it protects: `status` is the governed-mission read, at the groom
+  // cadence the ADR watches at. `rules --for` cannot host it — it only ever sees the paths its
+  // caller passed, so it can never know a map row matched no file.
+  {
+    const cov = territoryCoverage(root);
+    if (cov) {
+      console.log(section("Territory coverage"));
+      console.log(`  ${c.white(String(cov.covered))} ${c.darkGray(`of ${cov.walked} walked file(s) carry a category`)}${cov.byCategory.length ? c.darkGray(` · ${cov.byCategory.map((b) => `${b.category} ${b.files}`).join(" · ")}`) : ""}`);
+      console.log(cov.mapPresent
+        ? `  ${c.darkGray(`runward/territory.md: ${cov.mapRows} row(s) declared.`)}`
+        : `  ${c.darkGray("no runward/territory.md — categories come from derivation only.")}`);
+      if (cov.inertRows.length) {
+        console.log(`  ${c.warning("!")} ${c.white(String(cov.inertRows.length))} ${c.darkGray("row(s) matched no walked file:")}`);
+        for (const r of cov.inertRows) console.log(`      ${c.darkGray(`territory.md:${r.line}  ${r.pattern} → ${r.category}`)}`);
+        console.log(`  ${c.darkGray("A row that affects nothing today. Dead or merely early is your call, not the tool's.")}`);
+      }
+    }
+  }
+
   // Activity — the most recently touched deliverable, so a receiving team sees the last movement
   console.log(section("Activity"));
   let latest: { date: string; label: string } | null = null;
@@ -120,11 +144,19 @@ export async function statusCommand(opts: { path?: string }): Promise<void> {
   if (latest) console.log(`  ${c.primaryBold("Last touched")}  ${c.white(latest.date)}  ${c.darkGray(latest.label)}`);
   else console.log(c.darkGray("  no deliverable written yet"));
 
-  // Workflows
+  // Workflows — promises read, never files counted (ADR-0067). Until W2 poses the contracts,
+  // "no contract yet" is the measured truth and is said as such.
   console.log(section("Workflows"));
   const missing = WORKFLOWS.filter((wf) => !existsSync(join(mission, "workflows", `${wf}.md`)));
-  if (missing.length === 0) console.log(c.success("  ✓ ") + c.white(`all ${WORKFLOWS.length} workflows present`));
-  else console.log(c.warning("  ! ") + c.white(`missing: ${missing.join(", ")} — run \`runward update\``));
+  if (missing.length > 0) console.log(c.warning("  ! ") + c.white(`missing: ${missing.join(", ")} — run \`runward update\``));
+  const wfContracts = readWorkflowContracts(mission);
+  const held = wfContracts.filter((x) => x.contract && x.contract.malformed.length === 0).length;
+  const broken = wfContracts.filter((x) => x.contract && x.contract.malformed.length > 0);
+  const absent = wfContracts.filter((x) => x.contract === null).length;
+  if (missing.length === 0) console.log(c.success("  ✓ ") + c.white(`all ${WORKFLOWS.length} workflows present`) + c.darkGray(` — contracts: ${held} held · ${broken.length} malformed · ${absent} not yet declared`));
+  for (const b of broken.slice(0, 3)) console.log(c.warning("  ! ") + c.white(`${b.file}: ${b.contract!.malformed[0]}`));
+  const joinBreaks = producesGateJoin(wfContracts);
+  for (const j of joinBreaks.slice(0, 3)) console.log(c.warning("  ! ") + c.darkGray(j));
 
   // Next — the transmission surface: name the next gesture, never leave the reader guessing
   console.log(section("Next"));

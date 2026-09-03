@@ -1,0 +1,289 @@
+# ADR-0059: the mutation ratchet is enforced as freshness, not as a level
+
+**Status**: accepted 2026-08-26 (all five criteria demonstrated in CI; the red/green pair for criterion 2 is recorded below with its run ids; this document crosses nothing)
+**Date**: 2026-08-24
+**Supersedes**: nothing. Completes [ADR-0046](ADR-0046-mutation-testing-is-an-instrument-not-a-gate.md) decision 2.
+
+## Context
+
+ADR-0046 decision 2 set a ratchet on 2026-08-05: on the named perimeter the score does not go down
+and the absolute-survivor list does not grow. **For sixteen days nothing enforced it, and nothing
+could.** There was no committed list, so "the list does not grow" had nothing to be compared against
+and could not be falsified. That is the shape
+[ADR-0045](ADR-0045-the-gate-cannot-be-satisfied-by-paperwork.md) refuses from an operator, standing
+unexamined inside runward's own doctrine.
+
+0.36.1 shipped the missing artifact: `docs/compliance/mutation-register.md`, generated from measured
+verdicts in `docs/compliance/mutation-survivors/`, guarded on shape by a test that never runs
+Stryker. The list now exists. Nothing re-derives it.
+
+This ADR decides what enforcement looks like, and it has to resolve a real tension between two
+statements this project already holds:
+
+- **ADR-0046 decision 2**: *"A drop is a finding to instruct, not an automatic refusal."*
+- **ADR-0045, as quoted in `src/lib/verdict.ts`**: *where the gate cannot verify, it says so IN THE
+  RUN — and the run is the exit code, not the prose beside it.*
+
+Read carelessly, the first says warn and the second says fail. Sixteen days of an unenforceable
+ratchet is the empirical argument that warning is not enough. But decision 1 forbids a mutation
+score from being a crossing condition, and it is right: a number placed high blocks honest work,
+placed low it certifies nothing.
+
+The way out is that **the two statements are about different objects.** Decision 2 is about the
+survivor COUNT — a level, which legitimately moves when a module enters the perimeter or a fix lands.
+ADR-0045 is about a CLAIM that nobody re-derived. The register is such a claim. Enforcing its
+freshness is not enforcing a level.
+
+## Decision
+
+### 1. What CI enforces is that the register describes this tree — never that a number is good enough
+
+The release-time job re-runs the pass and compares the result against the committed register. It
+fails when they disagree. It has **no threshold, and reads no score**: a module may sit at 60 % or at
+99 % and pass, and a survivor list may GROW and pass, provided the register says so and each new
+survivor is filed.
+
+This is the same shape as `runward verify` — re-derive and compare, never trust the document — turned
+on runward's own compliance material. It is not the threshold decision 1 forbids, because nothing is
+compared to an invented number; the comparison is between an artifact in the repository and what the
+code actually produces. Clearing a failure is the work decision 4 already prescribes: re-run,
+regenerate, instruct what is new, commit.
+
+Decision 2 survives intact. A drop is not automatically refused. **An UNINSTRUCTED drop is**, and so
+is a register that has stopped describing the code — because a stale register is a claim satisfied by
+paperwork.
+
+### 2. The ratchet compares on a position-independent key
+
+A survivor's Stryker identity is `line|column|endLine|endColumn|mutator|replacement`. Every one of
+those offsets moves when anything above it moves: three fixes in 0.36.1 shifted `evidenceReport` by
+47 lines. A ratchet keyed on offsets would report a hundred "new" survivors after a one-line fix, and
+a signal that cries on every honest change is a signal that gets switched off.
+
+The comparison key is therefore **(module, function, mutator, replacement, the TEXT of the mutated
+source line)**, normalised for whitespace. It survives code moving above it, and it changes exactly
+when the mutated code changes — which is when a human should look. `scripts/mutation-survivors.mjs`
+already derives that key for the register; the ratchet consumes the same one, so the artifact and its
+check cannot key on different things.
+
+The offset-based key stays in the per-function verdict files, where it identifies a mutant WITHIN one
+measured build. It is never the ratchet's key. The build's own sha256 already guards that use
+(`scripts/mutation-probe.mjs` refuses a list from another build).
+
+### 3. Release time and on demand — never the pull-request path
+
+ADR-0046 decision 3 stands and is the reason: an instrument that makes every change wait gets
+switched off, and a guard that is switched off guards nothing. The job runs on the release workflow
+and on manual dispatch. It does not run per commit, and it is not a required check on pull requests.
+
+Failing a release is the intended consequence. A release that ships a register no longer describing
+its own code ships exactly the unre-derived claim ADR-0045 exists to refuse — and 0.36.0 is the
+worked example of the adjacent failure: it shipped documentation for a capability the tarball did not
+contain.
+
+### 4. Per module, because the whole pass does not fit in one job
+
+The measured perimeter is 4 250 mutants over eleven modules, and only one of them is fully
+instructed. A single job would exceed the runner's ceiling, so the ratchet is a matrix keyed on the
+`mutate` array of `stryker.config.json` — the perimeter is data, so the matrix cannot silently drift
+from it. A module absent from the register is reported as absent, never as passing: **the ratchet
+reports coverage of itself.** Ten of the eleven modules are in that state today, and the job says so
+rather than reporting green on the one that is done.
+
+### 5. The harness preconditions apply in CI, and a refusal to measure is not a pass
+
+The amendment of 2026-08-20 makes the instrument refuse to measure what it cannot measure: process
+groups killed whole, hangs reported rather than inferred, one harness at a time, the mutant read back
+from disk, the mutant list bound to its build. A CI runner is quieter than a laptop but not immune —
+the contaminated pass that read 98.1 % instead of 77.4 % was caused by the harness, not by the
+machine being busy in some exotic way.
+
+So a run that refuses to measure exits non-zero like a mismatch does. "The instrument declined" and
+"the register is fresh" must not share an outcome, because the first silently becomes the second the
+moment anyone stops reading logs.
+
+## Alternatives considered
+
+**A warning that never fails.** Rejected on evidence rather than on principle: the ratchet was
+already a warning nobody could act on for sixteen days, and the register it needed did not exist for
+the same reason. A signal in the prose is not a signal.
+
+**An absolute score floor in CI.** Refused by ADR-0046 decision 1, and this ADR does not reopen it.
+A floor high enough to mean anything on `evidence` today would fail the build at 77.4 %, and the
+honest reading of 77.4 % is a list of 144 filed holes, not a failure.
+
+**Blocking pull requests.** Cost, per decision 3. Also wrong in kind: a PR that changes one function
+would re-measure a perimeter of 4 250 mutants to learn something about one of them.
+
+**Keying the ratchet on offsets.** Measured as unusable: a one-line fix moved 84 mutants by 47 lines.
+
+**Committing the raw Stryker report as the baseline.** 13 MB per module, unreadable, and it would put
+the machine-generated artifact in the position of the reviewed one. The register is a document a
+human reads; that is the point of it.
+
+## Consequences
+
+- A release can be blocked by a stale register. That is the intended cost, and it is cheap to clear:
+  re-run, regenerate, instruct what is new.
+- Ten of eleven modules will report as unmeasured until they are instructed. The job will look
+  mostly-red for as long as that is true, and it should — the alternative is a green that means
+  "one module out of eleven".
+- Adding a module to `stryker.config.json` adds a matrix leg with no register behind it, so the
+  perimeter cannot be widened silently for appearances.
+- The comparison key must be produced by exactly one implementation. Two would drift, and a ratchet
+  whose two sides key differently reports noise.
+
+## What this does not claim
+
+- **Not a quality gate.** No score is a crossing condition, here or in `runward check`. The gate's
+  own contract (`GATE_NON_SCOPE`) is untouched: this governs runward's development, ships in no
+  package, and runs for no user.
+- **Not a claim that 144 holes are acceptable or unacceptable.** That is a judgement the register
+  exists to support, not to make.
+- **Not a proof that the perimeter is right.** Decision 5 of ADR-0046 publishes its absences, and one
+  of them is under revision (see that ADR's amendment of 2026-08-24).
+- **Not protection against a deliberate maintainer.** Anyone who can commit can regenerate the
+  register from a weakened suite. The trust anchor stays the reviewed commit (ADR-0021), as it does
+  for the corpus lock, and for the same reason `src/lib/scaffold-lock.ts` already records: the lock is
+  not the authority.
+
+## Ratification
+
+This ADR is ratified when all of the following are demonstrated, not asserted:
+
+1. The workflow exists, runs on the release event and on manual dispatch, and is **not** a required
+   check on pull requests.
+2. It is **proven red**: a deliberately edited register (one row removed, one count changed) fails the
+   job, and restoring it passes. Recorded in the run log, the way the Windows leg was.
+3. A module absent from the register is reported as absent by the job, and that outcome is
+   non-passing.
+4. A refused measurement (a harness precondition failing) exits non-zero and is distinguishable in
+   the log from a mismatch.
+5. The comparison key has ONE implementation, consumed by both the register generator and the
+   ratchet, with a test that fails if they diverge.
+
+## Ratification progress — 2026-08-24
+
+Demonstrated locally, on this tree, with the outcome recorded rather than asserted:
+
+| Criterion | Status | Evidence |
+| --- | --- | --- |
+| 1. workflow exists, release + dispatch, not required on PRs | **yes** | `.github/workflows/mutation-ratchet.yml`: triggers are `release: published` and `workflow_dispatch`, with no `pull_request`. The matrix is derived from `stryker.config.json`, so it cannot drift from the perimeter. Branch protection on `main` requires `test (22)`, `test (24)`, `floor-ts` and `core tests, network-isolated` — read from the API on 2026-08-24, and this job is not among them. |
+| 2. proven red on a falsified register | **yes**, closed 2026-08-26 — see the ratification section below | Locally, two falsifications each reverted: a verdict row removed → exit 1; a `stableKey` altered → exit 1; restored → exit 0 both times. In CI, the pair the criterion asks for: run 32991880465 on `d03448bb` reads `1 survivor(s) the register does not carry` and exits 1; run 32986780418 on `8393e0b6` reads *the register describes this tree* and exits 0. The CI run this line originally owed also refuted decision 4's sizing, which is the amendment of 2026-08-25. |
+| 3. an absent module is reported absent and does not pass | **yes** | `--module check` against a verified 50-mutant sample: *"check has no entries in docs/compliance/mutation-survivors: it has never been instructed"*, exit 2. |
+| 4. a refused measurement is non-zero and distinguishable | **yes** | Exit 2 with `REFUSED — nothing was compared. This is not a passing outcome.`, separate from the exit 1 of a mismatch. Reached on an unverified-timeout report and on an uninstructed module. |
+| 5. one key implementation, guarded | **yes** | `scripts/mutation-key.mjs` is the only one; `test/unit/mutation-key.test.js` (8 cases) proven red three ways: dropping the mutated text from the key, dropping whitespace normalisation, and adding a second implementation under `scripts/`. |
+
+**What building it changed in the artifact.** The ratchet's first run against its own register failed,
+and it was right to. Two mutants caught by the whole net were excluded from the register by a prose
+exception, though `defence-in-depth` is one of the four filings ADR-0046 decision 4 defines. They are
+now filed, and the register carries 217 rows instead of 215. A prose exception is a row the ratchet
+reports as new on every run, forever.
+
+**A defect it found in the verification step.** `scripts/mutation-timeouts.mjs` ran the module's own
+tests as its cheap first phase. `check` has none, and `node --test` with no files discovers and runs
+the whole suite — so the phase expired every time and confirmed all four timeouts of the `check`
+sample as real hangs. Verified properly, none of them was: three are survivors and one an ordinary
+kill. The comment in that script asserted the opposite and nobody had run it.
+
+## Ratification — 2026-08-26
+
+Criterion 2 was the only one outstanding, and it asked for something specific: a register edited **on
+purpose** must redden the job, and restoring it must green it, recorded in a run log. Both runs were
+made rather than argued around.
+
+| | run | commit | register | verdict |
+| --- | --- | --- | --- | --- |
+| red | [32991880465](https://github.com/stranxik/runward/actions/runs/32991880465) | `d03448bb` | 213 rows, one removed | 38 of 38 chunks, 8 timeouts verified, **`1 survivor(s) the register does not carry`**, `MISMATCH`, exit 1 |
+| green | [32986780418](https://github.com/stranxik/runward/actions/runs/32986780418) | `8393e0b6` | 214 rows, restored | 38 of 38 chunks, 8 timeouts verified, *the register describes this tree*, exit 0 |
+
+The row removed is `clean` / `Regex` / line 190, filed `defence-in-depth`, and the register was
+regenerated after the edit so the count moved with it. **One** survivor unaccounted for is the number
+that matters: a ratchet that only noticed gross drift would let a single row vanish in silence, and
+that is exactly the case the three genuine-drift reds below could not prove.
+
+**The stronger evidence, which does not replace the criterion.** The same day produced three reds on
+a register that was authentically stale, carrying 65, 44 and 45 differences
+([32951829865](https://github.com/stranxik/runward/actions/runs/32951829865),
+[32962568663](https://github.com/stranxik/runward/actions/runs/32962568663),
+[32969985147](https://github.com/stranxik/runward/actions/runs/32969985147)), then a green once it was
+regenerated ([32981466494](https://github.com/stranxik/runward/actions/runs/32981466494)). That
+sequence demonstrates the property this ADR is about — the ratchet reacts to a register that has
+stopped describing the code — which a staged falsification does not. It is recorded as evidence
+alongside criterion 2, never in place of it.
+
+**Why the criterion was not amended to fit the evidence in hand.** That was the alternative, and it
+was the wrong one. Amending a ratification criterion because the run you made differs from the run
+you promised is the same move as editing a manifest to make a status pass, one storey up, in the
+artifact whose entire purpose is to refuse it. The legitimate amendments in this repository all rest
+on a premise **measured false** — ADR-0046's decision 5, and its environment-independence finding of
+2026-08-26. Nothing here was measured false; two unattended CI runs were simply cheaper than the
+precedent.
+
+**A run that never ran is not a verdict.** The first attempt at the red
+([32985181924](https://github.com/stranxik/runward/actions/runs/32985181924)) sat `queued` for 1 h 35
+with **zero jobs scheduled** and closed itself. Reading it as a failure — or worse, as a pass — would
+have filed a run that measured nothing. It was re-dispatched from a branch pinned to the falsified
+commit, and that branch (`test/adr-0059-criterion-2-red`) exists only so the run log has a ref to
+point at. Same family as the `REFUSED` outcome criterion 4 exists for: an absence of measurement does
+not read as a measurement.
+
+**What the register holds at ratification.** 214 survivors across 22 functions, every one filed —
+144 `hole`, 43 `equivalent`, 25 `display-only`, 2 `defence-in-depth` — instructed by three benches
+whose verdicts were carried forward on the **stable key**, not on a name. That distinction is not
+cosmetic: matching by (function, mutator, replacement) claimed 30 of 44 verdicts were reusable and the
+key said 17, the difference being almost entirely a function whose line had been rewritten that
+morning.
+
+## Amendment (2026-08-25) — the first real run refuted decision 4's sizing
+
+Criterion 2 of the ratification asked for a CI run. It happened, and it **cancelled at exactly 6 h 00**
+— the runner's job ceiling — on `evidence` alone. Decision 4 justified a per-module matrix ON that
+ceiling, so the sizing it rests on is wrong: the ceiling sits *below* one module, not above it.
+
+That is the criterion working. An ADR whose hypothesis is refuted by its own ratification has to say
+so, not quietly widen the hypothesis.
+
+**Decision 4 is amended: the matrix is per module AND per line range.** `scripts/mutation-chunked.sh`
+already knew how to split a module; the workflow simply did not use it. The plan is derived from
+`stryker.config.json` and the built files — 15 modules become 68 chunks of 60 lines — so the matrix
+still cannot drift from the perimeter, which was decision 4's actual point.
+
+**Two things the run also settled, both about measuring rather than about scheduling:**
+
+- **Concurrency is computed on the runner, never copied from the config.** The committed value (2)
+  was measured on an 8-core machine against a suite that uses 3.1 cores, because `node --test`
+  parallelises its own files. A standard runner has FOUR cores, where the same arithmetic gives ONE.
+  This matters beyond speed: Stryker counts a Timeout as DETECTED, so an oversubscribed run is filed
+  as a caught mutant and the score moves in the flattering direction — measured twice, on
+  2026-08-19 and again on 2026-08-24, both times upward.
+- **A partial measurement REFUSES.** The merge counts the chunks that came back against the chunks
+  the plan asked for, and exits 2 when they differ. Comparing a partially measured tree against a
+  whole register would report "no new survivors" for a region nobody measured, which is the exact
+  false green this job exists to prevent.
+
+**The cost, stated because it decides how this is used.** 68 chunks at eight in parallel is roughly
+five hours of wall clock and forty runner-hours per full pass. That is a release-window job and
+nothing else — decision 3 stands, and this is the arithmetic behind it.
+
+## Reevaluation trigger (mandatory, dated)
+
+**Trigger set on**: 2026-11-05 — the next pass due under ADR-0046 — or at the first release blocked by
+this job.
+
+The decision is wrong and must be revisited if any of these holds: the job blocked a release for a
+reason no human agreed with; clearing a legitimate failure took longer than instructing the survivors
+it named; the matrix stopped tracking the `mutate` array; or the ratchet reported new survivors after
+a change that touched no measured code, which would mean the position-independent key is not.
+
+## References
+
+- [ADR-0046](ADR-0046-mutation-testing-is-an-instrument-not-a-gate.md) — the instrument, its four
+  filings, and decision 2, whose ratchet this enforces.
+- [ADR-0045](ADR-0045-the-gate-cannot-be-satisfied-by-paperwork.md) — a verdict may not rest on what
+  the audited party writes; the ground for enforcing freshness rather than a level.
+- [ADR-0054](ADR-0054-the-runtime-boundary-is-explicit.md) — same working tree, same verdict; the rule
+  the harness preconditions apply to runward's own instruments.
+- [ADR-0021](ADR-0021-blocking-drift-and-evidence-sealing.md) — why this is not protection against
+  a deliberate maintainer.
+- `docs/compliance/mutation-register.md` — the artifact this job re-derives.

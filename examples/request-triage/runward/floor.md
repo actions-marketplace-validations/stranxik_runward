@@ -23,18 +23,27 @@
 | hexa-move-deterministic-out | applied | file:code/src/core/domain/guard.ts#parseDeadline — classification and validation are deterministic, out of the model |
 | config-secrets-boundary | n/a | the illustrative floor runs the deterministic keyword classifier; no provider secret is read in this example code |
 | provider-llm-auto-detection | n/a | only the deterministic keyword adapter ships here; no real provider to auto-detect |
-| security-prompt-injection | applied | threat-model §3 + ADR-0002 — model-proposed values never act; request text is data, not instruction |
-| hexa-architecture | applied | code/src/core/ pure domain behind four ports |
-| hexa-adapter-pattern | applied | code/src/adapters/ — mailbox/web, keyword-model, routing, log behind ports |
+| security-prompt-injection | applied | test:code/test/triage.test.ts — threat-model §3 + ADR-0002 — model-proposed values never act; request text is data, not instruction |
+| hexa-architecture | applied | file:code/src/core/domain/triage.ts — code/src/core/ pure domain behind four ports |
+| hexa-adapter-pattern | applied | file:code/src/adapters/in-memory-routing.adapter.ts — code/src/adapters/ — mailbox/web, keyword-model, routing, log behind ports |
 | provider-no-crash-missing-env | applied | file:code/src/adapters/keyword-model.adapter.ts — deterministic fallback runs with no key |
 | state-event-sourcing | applied | file:code/src/adapters/in-memory-triage-log.adapter.ts — append-only, keyed by request ID |
-| tools-scope-atomicity | applied | architecture §2 middleware chain + approval on RoutingPort for compliance records |
-
+| tools-scope-atomicity | applied | file:code/src/core/ports/routing.port.ts#RoutingApproval — architecture §2 middleware chain + approval on RoutingPort for compliance records |
+| async-post-turn-pipeline | n/a | the floor is synchronous end to end — one request, one guarded reply, nothing deferred after the turn; an async pipeline is a target-tier capability behind a measured trigger |
+| checklist-day-zero-project | applied | file:code/package.json; test:code/test/triage.test.ts — structure, lockfile, tests and the demo run from the first day of the mission |
+| data-migrations-forward-only | n/a | the floor persists nothing beyond the registry seeded per run: no database, no migration — persistence is a target-tier decision named with its trigger |
+| scaling-state-externalization | n/a | a single-instance floor with no session state: the request registry is rebuilt per run, and externalisation is the multi-instance trigger named in the framing's deferrals |
+| tools-registry-pattern | n/a | the model port takes request text in and a label out; no tool call exists on the floor, so there is no tool registry to pattern |
 ## 2. Proof against the success criterion
+
+**Criterion**: SC-1
+**Metric**: share of requests routed to the correct team on first assignment
+**Threshold (success)**: > manual baseline measured over the same period the previous month
+**Period**: 2026-06-09..2026-06-19
+**Verdict**: partially-met — met on result on the replayed sample and the first live week; the criterion's two-week live window needs one more week before the iterate gate
 
 - **Traffic used**: 200 real requests replayed from the previous month's mailbox archive (stratified across the three categories to match observed proportions), then one week of live shadow traffic (~380 requests) routed in parallel with the manual process. No hand-picked cases.
 - **Measured result** *(illustrative)*: routing accuracy 87% on first assignment on the replayed set, against a manual baseline of 71% reconstructed from the ticketing system's reassignment history for the same month. Live shadow week: 84%, baseline that week 73%. Attached condition held: 100% of compliance-category requests reached the compliance queue or human review; zero silent misses. Guard escalation rate: 14% (under the 25% reevaluation trigger of ADR-0002).
-- **Verdict**: criterion met on the replayed sample and the first live week. The gate to `iterate` requires the full two-week live window per the criterion's wording — one more week of live measurement before the gate is crossed. Partial by duration, not by result.
 - **Observability check**: confirmed — a full trajectory (intake, model proposal, per-field guard outcome, routing decision, persistence) reconstructs from a single request ID; verified on 10 randomly drawn requests.
 
 **Behavioral proof**: `cd code && npm test`

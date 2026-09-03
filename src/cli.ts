@@ -5,11 +5,15 @@
  * update, characterize, compliance (evidence pack), manifest (table plumbing),
  * rules / explain (rule-set surface).
  */
-import { Command } from "commander";
+import { Command, Option } from "commander";
 import { VERSION } from "./lib/paths.js";
+import { THROUGH_PHASE_IDS } from "./lib/mission.js";
 import { c } from "./lib/styles.js";
 import { initCommand } from "./commands/init.js";
 import { checkCommand } from "./commands/check.js";
+import { verifyCommand } from "./commands/verify.js";
+import { bundleCommand } from "./commands/bundle.js";
+import { specCheckCommand } from "./commands/spec-check.js";
 import { statusCommand } from "./commands/status.js";
 import { doctorCommand } from "./commands/doctor.js";
 import { wireCommand } from "./commands/wire.js";
@@ -17,8 +21,13 @@ import { updateCommand } from "./commands/update.js";
 import { characterizeCommand } from "./commands/characterize.js";
 import { complianceCommand } from "./commands/compliance.js";
 import { manifestCommand } from "./commands/manifest.js";
+import { proposeCommand } from "./commands/propose.js";
+import { ratifyCommand } from "./commands/ratify.js";
+import { gateHookCommand } from "./commands/gate-hook.js";
+import { GATE_HOOK_HARNESSES } from "./lib/gate-hook.js";
 import { rulesCommand, explainCommand } from "./commands/rules.js";
 import { TOOL_IDS } from "./lib/tools.js";
+import { GATED_DELIVERABLES } from "./lib/conformance.js";
 
 // Exit codes: 0 = success · 1 = gaps/warnings · 2 = missing prerequisite or CLI misuse (typo, unknown flag)
 
@@ -69,8 +78,48 @@ program
   .option("--freeze", "seal a green strict gate: hash the evidence into runward/evidence-lock.json (implies --strict)")
   .option("--hooks", "run operator hooks from runward/hooks.json around the audit (opt-in)")
   .option("--coverage", "advisory: report deliverable + decision-ratification coverage (does not gate)")
+  // ADR-0053: a declared construction horizon. `choices()` rejects an unknown id as
+  // `commander.invalidArgument` → exit 2 (misuse). The `--through`+`--freeze` conflict is guarded
+  // in checkCommand (a seal certifies a full crossing, never a prefix).
+  .addOption(new Option("--through <phase-id>", `construction gate: certify only phases up to and including <phase-id> (${THROUGH_PHASE_IDS.join(" | ")}) — a progress signal, never the sole release gate (ADR-0053)`).choices([...THROUGH_PHASE_IDS]))
   .option("--json", "machine output: verdict, current gate, deliverable states, conformance gaps (stable contract, for agent-driven runs)")
+  // ADR-0055: emit the verdict as an UNSIGNED in-toto Statement (a Statement wrapping --json, whose
+  // subject binds it to this mission tree). The operator signs it under their own key (never runward's).
+  .option("--attest", "emit the verdict as an unsigned in-toto attestation (in-toto Statement wrapping --json; sign it yourself under your own key)")
+  // ADR-0056 widening, emission half: the verdict in the format every forge already renders, so a
+  // gap becomes an annotation on the manifest row that carries it. Emission only — runward writes
+  // the file; uploading it is the operator's CI step (ADR-0054).
+  .option("--sarif", "emit the verdict as a SARIF 2.1.0 log (annotations on the manifest rows; upload it yourself)")
+  // ADR-0011/ADR-0055: a NEUTRAL port. An ecosystem verifier reads a VSA already and needs to learn
+  // nothing about runward. `--resource-uri` is required and has no default: runward reads a working
+  // tree and knows nothing about where it is published, so guessing the name would put an
+  // unverifiable claim into an attestation a policy engine acts on.
+  .option("--vsa", "emit the verdict as a SLSA Verification Summary Attestation (needs --resource-uri; set SOURCE_DATE_EPOCH to keep it byte-idempotent)")
+  .option("--resource-uri <uri>", "the artifact the VSA is about (a package, image or release URI) — required with --vsa, never guessed")
   .action(checkCommand);
+
+program
+  .command("verify")
+  .description("re-check a `check --attest` attestation offline — the tree has not drifted and the verdict re-derives, on the repo alone (ADR-0055)")
+  .argument("<attestation>", "path to the in-toto Statement emitted by `runward check --attest`")
+  .option("-p, --path <path>", "project directory")
+  .option("--json", "machine output: verified, and the digest/verdict match (stable contract)")
+  .action(verifyCommand);
+
+program
+  .command("bundle")
+  .description("bind delivery artifacts (the verdict attestation, seal, OSCAL, SBOM) into one in-toto-attested manifest — a single provenance for an assessor (ADR-0055)")
+  .argument("<artifacts...>", "the artifact files to bind, referenced by raw SHA-256 (verifiable by runward verify or any cosign/in-toto tool)")
+  .option("-p, --path <path>", "project directory")
+  .action(bundleCommand);
+
+program
+  .command("spec-check")
+  .description("deterministic spec conformance: every acceptance criterion is LINKED to a present delivered artifact, and every criterion identifier the bundle references is declared — never a claim it is semantically met (ADR-0056)")
+  .argument("<spec...>", "spec/constitution markdown file(s), or a bundle DIRECTORY (spec-kit `specs/<feature>/`, an OpenSpec change dir) — its *.md are read, sorted")
+  .option("-p, --path <path>", "project root the criteria's file:/test: pointers resolve against (default: .)")
+  .option("--json", "machine output: verdict, per-criterion linkage, non-scope (stable contract)")
+  .action(specCheckCommand);
 
 program
   .command("status")
@@ -88,6 +137,8 @@ program
   .description("recommend the auto-trigger channel for the AI harness running this command (read-only; never wires — the operator does, ADR-0012)")
   .option("-p, --path <path>", "project directory")
   .option("--json", "machine output: detection status, harness, recommended + candidate channels (stable contract)")
+  .option("--install", "the operator's writing gesture (ADR-0065): shows the exact file, asks y/N, writes atomically with a probe and a committed journal — TTY-only, refused under an agent runtime signal, and --yes does not exist here")
+  .option("--uninstall", "the symmetric removal of what --install wrote, under the same locks (the global --dry-run renders either gesture without writing, exempt from the locks)")
   .action(wireCommand);
 
 program
@@ -95,6 +146,10 @@ program
   .description("refresh runward/workflows/ and runward/rules/ from this package version (mission state untouched)")
   .option("-p, --path <path>", "project directory")
   .option("--force", "overwrite locally modified workflows")
+  // ADR-0057: vendor the rule corpus from an already-vendored local DIRECTORY (an org's policy
+  // corpus), not the package rules. Takes a filesystem path, NEVER a registry coordinate like
+  // @org/rules — runward resolves no package specifiers.
+  .option("--corpus <path>", "vendor runward/rules/ from this local corpus directory (a path, never a registry coordinate)")
   .action(updateCommand);
 
 program
@@ -112,11 +167,38 @@ program
   .action(manifestCommand);
 
 program
+  .command("propose")
+  .description("deterministic proposer (ADR-0066): fill empty manifest rows as proposed:applied where a rule's signature matches inside its declared territory — no model call; the gate refuses every proposal until you ratify")
+  .option("-p, --path <path>", "project directory")
+  .action(proposeCommand);
+
+program
+  .command("ratify")
+  .description("turn proposals into your decisions, against displayed evidence (ADR-0066); interactive only — --attest-blind is the recorded, disclosed escape")
+  .option("-p, --path <path>", "project directory")
+  .option("--all", "en-bloc ratification with a mandatory sample drawn deterministically from the mission digest")
+  .option("--by <name>", "the declared ratifier (defaults to the OS user name; always recorded as declared)")
+  .option("--attest-blind", "ratify without displayed evidence and RECORD the mode as BLIND — disclosed by every later check and carried by the attestation")
+  .action(ratifyCommand);
+
+program
+  .command("gate-hook")
+  .description("the harness seam (ADR-0065): reads the hook payload on stdin, runs the strict verdict in process, and refuses in the harness's native shape — blocks once (native re-entry guards honoured), traces every release to runward/gate-bypass.log, fails open on infrastructure and never on a verdict")
+  .requiredOption("--harness <id>", `one of: ${'${'}GATE_HOOK_HARNESSES.join(", ")}`)
+  .option("-p, --path <path>", "project directory")
+  .action(gateHookCommand);
+
+program
   .command("rules")
   .description("the effective rule set (mission copy, else package); --json is a stable machine contract")
   .option("-p, --path <path>", "project directory")
   .option("--json", "machine output: { runward, source, count, rules } sorted by slug (versioned, additive)")
-  .option("--phase <id>", "only the rules mapped to this phase (architect | topology | floor | govern)")
+  // Derived from the single source, never a hardcoded list — a new gated phase (e.g. handover,
+  // ADR-0026) must never be missing from this help the way it was before.
+  .option("--phase <id>", `only the rules mapped to this phase (${GATED_DELIVERABLES.map((d) => d.phase).join(" | ")})`)
+  // ADR-0041: paths come from the caller — runward never computes the change set itself.
+  // Composes with the harness: `git diff --name-only "$BASE...HEAD" | xargs runward rules --for`.
+  .option("--for <paths...>", "only the rules whose declared territory (appliesTo:) covers these project-relative paths; prints the pattern that matched")
   .action(rulesCommand);
 
 program

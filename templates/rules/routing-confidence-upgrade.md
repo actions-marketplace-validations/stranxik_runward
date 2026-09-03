@@ -1,8 +1,12 @@
 ---
 title: If Doubt, Upgrade the Model
+noAsi: answer quality and cost arbitration; no agentic-security surface.
+phases: [govern]
+requires: junit
 impact: CRITICAL
 impactDescription: Prevents quality degradation from incorrect model selection
 tags: [routing, llm, cost-optimization, quality]
+noTerritory: It is a decision rule over the complexity classifier's output — a model-selection behaviour — not a constraint on a code location.
 ---
 
 ## If Doubt, Upgrade the Model

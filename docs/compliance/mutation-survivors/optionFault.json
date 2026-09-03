@@ -1,0 +1,15 @@
+{
+ "function": "optionFault",
+ "probeMissions": [],
+ "verdicts": [
+  {
+   "key": "52|40|52|47|StringLiteral|\"\"",
+   "line": 52,
+   "mutator": "StringLiteral",
+   "filing": "display-only",
+   "evidence": "Le seul cosmétique vrai du lot. Mesuré : exit 2 conservé, message '--json--sarif each write a different document... Run runward check once per document you need.' — les DEUX noms de drapeaux restent présents et matchables (/--json/ et /--sarif/ matchent tous deux), l'instruction de remédiation est intacte ; seule la conjonction entre les noms disparaît. Contrôle : le kill-test conforme à la doctrine du module ('on ne pinne que le NOM du drapeau, jamais la prose') survivrait à ce mutant même une fois le hole de la branche plugé ; seul un pin de prose exacte le tuerait, ce que le fichier de test refuse explicitement. Contenu opérateur-exécutable intégralement préservé.",
+   "argument": "Le seul cosmétique vrai du lot. Mesuré : exit 2 conservé, message '--json--sarif each write a different document... Run runward check once per document you need.' — les DEUX noms de drapeaux restent présents et matchables (/--json/ et /--sarif/ matchent tous deux), l'instruction de remédiation est intacte ; seule la conjonction entre les noms disparaît. Contrôle : le kill-test conforme à la doctrine du module ('on ne pinne que le NOM du drapeau, jamais la prose') survivrait à ce mutant même une fois le hole de la branche plugé ; seul un pin de prose exacte le tuerait, ce que le fichier de test refuse explicitement. Contenu opérateur-exécutable intégralement préservé.",
+   "stableKey": "check-contract\u0001optionFault\u0001StringLiteral\u0001\"\"\u0001\" and \"\u0001message: `${emissions.join(\" and \")} each write a different document to stdout, and only one can. Run \\`runward check\\` once per document you need.`,"
+  }
+ ]
+}

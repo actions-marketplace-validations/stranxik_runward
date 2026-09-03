@@ -1,0 +1,302 @@
+# The mutation ratchet of ADR-0059: re-derive the survivor register, refuse a stale one.
+#
+# It reads NO score. A module may sit at 26 % or at 99 % and pass; a survivor list may GROW and pass.
+# What fails is a register that has stopped describing the code — a claim nobody re-derived, which is
+# the shape ADR-0045 refuses from an operator.
+#
+# NOT a required check on pull requests, by ADR-0046 decision 3: an instrument that makes every
+# change wait gets switched off, and a guard that is switched off guards nothing. It runs when a
+# release is published, and on demand.
+#
+# TWO ROLES, AND THEY MUST NOT SHARE AN EXIT CODE. On a release this is a GATE: a register that has
+# stopped describing the code fails the run, and that is the whole point. On a manual dispatch it is
+# usually an INSTRUMENT: you run it to LEARN whether the register still holds, on a module nobody has
+# instructed yet or after a fix — and there a refusal is the instrument's ANSWER, not a fault in the
+# repository. Reporting that answer as a failed run mails the maintainer an alarm for a question they
+# asked on purpose. Measured 2026-08-28: of 41 failed runs over eleven days, 32 were this workflow
+# and 17 were dispatched on a single afternoon by a campaign doing exactly that. The cost is not the
+# noise, it is what noise does to a signal — a maintainer who learns to skip this workflow's mail is
+# a maintainer who will skip the one that matters.
+#
+# So `mode: measure` reports the refusal, in the log and in the job summary, and exits 0. It is an
+# explicit choice at dispatch time and it is NEVER the default: the release path never reads the
+# input, so the gate keeps failing exactly as before. This is not a bypass — nothing about the
+# verdict changes, only whether an answer you asked for is filed as an incident.
+#
+# WHY THIS IS CHUNKED, measured rather than assumed. The first real run (2026-08-24) was CANCELLED at
+# exactly 6 h 00 — the runner's job ceiling — on `evidence` alone. ADR-0059 decision 4 justified a
+# per-module matrix ON that ceiling, and the ceiling turned out to sit below one module. So the
+# matrix is per module AND per line range, which `scripts/mutation-chunked.sh` already knew how to do
+# and this workflow did not use.
+name: Mutation ratchet (ADR-0059)
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      module:
+        description: "One module to check, or blank for the whole perimeter"
+        required: false
+        type: string
+      chunk_lines:
+        description: "Lines per chunk (smaller = more legs, each shorter)"
+        required: false
+        default: "60"
+        type: string
+      mode:
+        description: "gate = a refusal fails the run · measure = a refusal is the instrument's answer, reported and not failed"
+        required: false
+        default: gate
+        type: choice
+        options: [gate, measure]
+
+permissions:
+  contents: read
+
+jobs:
+  # The plan is DERIVED from stryker.config.json and from the built files, never written here. The
+  # perimeter is data (ADR-0046), so a module cannot be added to the measurement and left out of the
+  # ratchet, or removed from the ratchet while still claiming to be measured.
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      chunks: ${{ steps.split.outputs.chunks }}
+      modules: ${{ steps.split.outputs.modules }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - id: split
+        env:
+          ONLY: ${{ inputs.module }}
+          STEP: ${{ inputs.chunk_lines || '60' }}
+        run: |
+          node -e '
+            const { readFileSync, existsSync } = require("node:fs");
+            const cfg = require("./stryker.config.json");
+            const only = process.env.ONLY || "";
+            const step = Number(process.env.STEP || 60);
+            const chunks = [];
+            const modules = [];
+            for (const entry of cfg.mutate) {
+              const file = entry.replace(/:.*$/, "");
+              const name = file.replace(/^.*\//, "").replace(/\.js$/, "");
+              if (only && name !== only) continue;
+              if (!existsSync(file)) throw new Error(`perimeter names ${file} and it is not built`);
+              modules.push(name);
+              const lines = readFileSync(file, "utf8").split("\n").length;
+              for (let s = 1; s <= lines; s += step) {
+                chunks.push({ module: name, file, start: s, end: Math.min(s + step - 1, lines) });
+              }
+            }
+            if (chunks.length === 0) throw new Error("nothing to measure — check the module input");
+            console.log(`${modules.length} module(s), ${chunks.length} chunk(s) of ${step} lines`);
+            require("node:fs").appendFileSync(process.env.GITHUB_OUTPUT,
+              `chunks=${JSON.stringify(chunks)}\nmodules=${JSON.stringify([...new Set(modules)])}\n`);
+          '
+
+  measure:
+    needs: plan
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      # 16, not 8. A 885-line module at 30 lines a chunk is 30 legs, and at 8 abreast that is four
+      # waves of roughly two hours — long enough that the run becomes an overnight thing nobody
+      # watches. The account's ceiling on standard runners is 20 concurrent jobs, so 16 leaves room
+      # for CI on a pull request to still start; above the ceiling legs queue rather than fail.
+      max-parallel: 16
+      matrix:
+        chunk: ${{ fromJson(needs.plan.outputs.chunks) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+
+      # CONCURRENCY IS COMPUTED, not copied. The committed value (2) was measured on an 8-core
+      # machine against a suite that uses 3.1 cores — `node --test` parallelises its own files. A
+      # standard runner has FOUR cores, where the same arithmetic gives ONE. Oversubscription does
+      # not merely slow a pass down: Stryker counts a Timeout as DETECTED, so a starved run is filed
+      # as a caught mutant and the score moves in the flattering direction (measured 2026-08-19 and
+      # again 2026-08-24, both times upward).
+      # The step stops at five hours, an hour under the runner's own ceiling, and that hour is the
+      # whole point. When a JOB hits six hours GitHub CANCELS it: `if: always()` does not run, the
+      # artifact never uploads, and the log ends mid-sentence. That is what happened on 2026-08-24
+      # and again on the v0.36.2 release run, and both times the only thing left was "cancelled".
+      # A step that fails at five hours instead hands control back to the job: `continue-on-error`
+      # lets the remaining steps run, the upload fails loudly on a missing file, and the ratchet
+      # counts a chunk short and REFUSES. Same red, but a red that says which chunk and why.
+      - name: Measure ${{ matrix.chunk.module }} lines ${{ matrix.chunk.start }}-${{ matrix.chunk.end }}
+        timeout-minutes: 300
+        env:
+          RUNWARD_MUTATION_MODULE: ${{ matrix.chunk.module }}
+        run: |
+          CORES=$(nproc)
+          CONC=$(( CORES / 3 ))
+          [ "$CONC" -lt 1 ] && CONC=1
+          echo "::notice::$CORES cores, suite uses ~3 — concurrency $CONC"
+          npx stryker run \
+            --mutate "${{ matrix.chunk.file }}:${{ matrix.chunk.start }}-${{ matrix.chunk.end }}" \
+            --concurrency "$CONC" --force
+        continue-on-error: true   # a failed chunk must still reach the ratchet, which calls it REFUSED
+
+      # Not optional. Stryker counts a Timeout as DETECTED, and an unverified one hides a survivor:
+      # on `evidence` 199 of 269 "timeouts" turned out to be survivors when re-run alone. The ratchet
+      # refuses a report that carries timeouts without this stamp.
+      - name: Verify every timeout alone
+        run: |
+          [ -f reports/mutation/mutation.json ] || { echo "no report — the ratchet will refuse"; exit 0; }
+
+          # How many timeouts does this chunk actually carry? A chunk with NONE needs no
+          # verification and no stamp — and must still produce the artifact, or a healthy module
+          # fails the whole job for being healthy. That is what happened on the first chunked run
+          # (2026-08-25, module `paths`): "no Timeout-status mutants to verify", no verified.json,
+          # and the ratchet reported "0 of 1 chunks measured". The worst failure mode available —
+          # the clean case breaking the chain.
+          TIMEOUTS=$(node -e '
+            const r = require("./reports/mutation/mutation.json");
+            let n = 0;
+            for (const f of Object.values(r.files)) for (const m of f.mutants) if (m.status === "Timeout") n++;
+            process.stdout.write(String(n));
+          ')
+          echo "::notice::${{ matrix.chunk.module }} ${{ matrix.chunk.start }}-${{ matrix.chunk.end }}: $TIMEOUTS timeout(s)"
+
+          if [ "$TIMEOUTS" -eq 0 ]; then
+            cp reports/mutation/mutation.json reports/mutation/verified.json
+            exit 0
+          fi
+
+          # With timeouts present the verification is mandatory, and a FAILED verification must not
+          # be papered over: no verified.json means the ratchet refuses this chunk, which is the
+          # honest outcome. `|| true` here would turn "I could not check" into "checked and fine",
+          # the same confusion that produced RWD-2026-0029.
+          node scripts/mutation-timeouts.mjs \
+            --report reports/mutation/mutation.json \
+            --module "${{ matrix.chunk.module }}" \
+            --ledger reports/mutation/chunk-timeouts.jsonl || true
+          if [ ! -s reports/mutation/chunk-timeouts.jsonl ]; then
+            echo "::error::verification produced no verdicts for $TIMEOUTS timeout(s) — this chunk will be refused"
+            exit 0
+          fi
+          node scripts/mutation-apply-verdicts.mjs \
+            --report reports/mutation/mutation.json \
+            --verdicts reports/mutation/chunk-timeouts.jsonl \
+            --out "reports/mutation/verified.json" || true
+
+      - name: Keep this chunk
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          # `--` between the module and the offset, because a single dash is ALSO inside module
+          # names: `chunk-territory-*` matches `chunk-territory-map-61` and the territory leg then
+          # collected ten chunks where the plan asked for seven (RWD-2026-0089).
+          name: chunk-${{ matrix.chunk.module }}--${{ matrix.chunk.start }}
+          path: reports/mutation/verified.json
+          retention-days: 7
+          if-no-files-found: error   # a missing chunk must fail loudly here, not silently downstream
+
+  ratchet:
+    needs: [plan, measure]
+    if: always()
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        module: ${{ fromJson(needs.plan.outputs.modules) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+
+      - name: Collect this module's chunks
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: chunk-${{ matrix.module }}--*
+          path: reports/mutation/collected
+          merge-multiple: false
+
+      # A chunk that produced nothing is not a chunk that found nothing. The merge counts what it
+      # got against what the plan asked for, so an incomplete measurement REFUSES rather than
+      # comparing a partial tree against a whole register — the exact shape of a false green.
+      - name: Merge and ratchet ${{ matrix.module }}
+        env:
+          CHUNKS: ${{ needs.plan.outputs.chunks }}
+        run: |
+          mkdir -p reports/mutation/chunks
+          # `find`, not a fixed-depth glob. actions/download-artifact extracts into
+          # `<path>/<artifact-name>/` when the pattern matches SEVERAL artifacts, and straight into
+          # `<path>/` when it matches exactly one — so a one-chunk module lands a level higher than a
+          # many-chunk one. A `collected/*/verified.json` glob therefore worked for every module
+          # except the smallest, which is how `paths` reported "0 of 1 chunks measured" twice on
+          # 2026-08-25 with the artifact sitting in the workspace the whole time.
+          i=0
+          while IFS= read -r f; do
+            [ -n "$f" ] || continue
+            i=$((i+1))
+            cp "$f" "reports/mutation/chunks/${{ matrix.module }}-$(printf '%04d' "$i").json"
+          done <<EOF
+          $(find reports/mutation/collected -name verified.json -type f 2>/dev/null)
+          EOF
+          EXPECTED=$(node -e 'const c=JSON.parse(process.env.CHUNKS);process.stdout.write(String(c.filter(x=>x.module==="${{ matrix.module }}").length))')
+          echo "::notice::${{ matrix.module }}: $i of $EXPECTED chunk(s) came back"
+          if [ "$i" -eq 0 ] || [ "$i" -ne "$EXPECTED" ]; then
+            echo "::error title=${{ matrix.module }}::REFUSED — $i of $EXPECTED chunks measured. A partial tree compared against a whole register is a false green, so nothing is compared."
+            echo "### ${{ matrix.module }} — REFUSED before comparing" >> "$GITHUB_STEP_SUMMARY"
+            echo "$i of $EXPECTED chunk(s) came back." >> "$GITHUB_STEP_SUMMARY"
+            # Same rule as the ratchet's own exit below: on a measurement run the refusal is the
+            # answer, reported and not filed as an incident. This path was missed when `mode` was
+            # added, which is how a whole-perimeter measurement still came back red.
+            if [ "${{ inputs.mode }}" = "measure" ]; then
+              echo "::warning title=${{ matrix.module }}::measurement run (mode=measure): refused before comparing. Reported, not failed."
+              exit 0
+            fi
+            exit 2
+          fi
+          node scripts/mutation-survivors.mjs --chunks "${{ matrix.module }}" \
+            --emit-merged "reports/mutation/${{ matrix.module }}-merged.json" >/dev/null
+          set +e
+          node scripts/mutation-ratchet.mjs --module "${{ matrix.module }}" \
+            --report "reports/mutation/${{ matrix.module }}-merged.json"
+          CODE=$?
+          set -e
+          case "$CODE" in
+            0) echo "::notice title=${{ matrix.module }}::the register describes this tree" ;;
+            1) echo "::error title=${{ matrix.module }}::MISMATCH — the register no longer describes this tree. Re-run, instruct what is new, regenerate, commit." ;;
+            2) echo "::error title=${{ matrix.module }}::REFUSED — nothing was compared. This is not a passing outcome." ;;
+            *) echo "::error title=${{ matrix.module }}::unexpected exit $CODE" ;;
+          esac
+          # The verdict is written to the job summary either way, so `measure` hides nothing: it
+          # changes whether the run is filed as an incident, never what the ratchet decided.
+          {
+            echo "### ${{ matrix.module }} — ratchet exit $CODE"
+            case "$CODE" in
+              0) echo "The register describes this tree." ;;
+              1) echo "**MISMATCH** — the register no longer describes this tree. Instruct what is new, regenerate, commit." ;;
+              *) echo "**REFUSED** — nothing was compared. This is not a passing outcome." ;;
+            esac
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$CODE" -ne 0 ] && [ "${{ inputs.mode }}" = "measure" ]; then
+            echo "::warning title=${{ matrix.module }}::measurement run (mode=measure): the ratchet refused with exit $CODE. Reported, not failed — dispatch with mode=gate to have a refusal fail the run."
+            exit 0
+          fi
+          exit "$CODE"
+
+      - name: Keep the merged evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: merged-${{ matrix.module }}
+          path: reports/mutation/${{ matrix.module }}-merged.json
+          retention-days: 30
+          if-no-files-found: ignore

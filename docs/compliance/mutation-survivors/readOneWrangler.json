@@ -1,0 +1,96 @@
+{
+ "function": "readOneWrangler",
+ "probeMissions": [],
+ "verdicts": [
+  {
+   "key": "269|65|269|68|StringLiteral|\"\"",
+   "line": 269,
+   "mutator": "StringLiteral",
+   "filing": "hole",
+   "evidence": "Changing `.split(\"\\\\\").join(\"/\")` to `.join(\"\")` changed the derived path on the fixture whose entry module carries a backslash in its name: `src/a/b.ts` became `src/ab.ts`. The category is therefore bound to a different path string; on Windows, where relative() returns every separator as a backslash, the same mutant collapses every derived path.",
+   "argument": "Changing `.split(\"\\\\\").join(\"/\")` to `.join(\"\")` changed the derived path on the fixture whose entry module carries a backslash in its name: `src/a/b.ts` became `src/ab.ts`. The category is therefore bound to a different path string; on Windows, where relative() returns every separator as a backslash, the same mutant collapses every derived path.",
+   "stableKey": "territory\u0001readOneWrangler\u0001StringLiteral\u0001\"\"\u0001\"/\"\u0001const rel = relative(projectRoot, abs).split(\"\\\\\").join(\"/\");"
+  },
+  {
+   "key": "288|51|288|65|Regex|/[\"']|[\"']$/g",
+   "line": 288,
+   "mutator": "Regex",
+   "filing": "hole",
+   "evidence": "Dropping the `^` makes the strip remove every quote in the value, not just the delimiters. Measured on a manifest whose entry is `main = \"src/o'brien.ts\"`: the delivered code derives two bindings on `src/o'brien.ts`, the mutant resolves `src/obrien.ts`, finds nothing and emits `\\`main\\` does not resolve to a file in the project — nothing derived`. The scheduled-work and background-work categories vanish.",
+   "argument": "Dropping the `^` makes the strip remove every quote in the value, not just the delimiters. Measured on a manifest whose entry is `main = \"src/o'brien.ts\"`: the delivered code derives two bindings on `src/o'brien.ts`, the mutant resolves `src/obrien.ts`, finds nothing and emits `\\`main\\` does not resolve to a file in the project — nothing derived`. The scheduled-work and background-work categories vanish.",
+   "stableKey": "territory\u0001readOneWrangler\u0001Regex\u0001/[\"']|[\"']$/g\u0001/^[\"']|[\"']$/g\u0001const entry = resolveMain(mainRaw.replace(/^[\"']|[\"']$/g, \"\"));"
+  },
+  {
+   "key": "288|51|288|65|Regex|/^[\"']|[\"']/g",
+   "line": 288,
+   "mutator": "Regex",
+   "filing": "hole",
+   "evidence": "Dropping the `$` on the second alternative has the same effect as dropping the `^` on the first: interior quotes are stripped. On the `main = \"src/o'brien.ts\"` fixture the two bindings became a single `\\`main\\` does not resolve to a file in the project` note, measured before/after.",
+   "argument": "Dropping the `$` on the second alternative has the same effect as dropping the `^` on the first: interior quotes are stripped. On the `main = \"src/o'brien.ts\"` fixture the two bindings became a single `\\`main\\` does not resolve to a file in the project` note, measured before/after.",
+   "stableKey": "territory\u0001readOneWrangler\u0001Regex\u0001/^[\"']|[\"']/g\u0001/^[\"']|[\"']$/g\u0001const entry = resolveMain(mainRaw.replace(/^[\"']|[\"']$/g, \"\"));"
+  },
+  {
+   "key": "300|61|300|63|StringLiteral|\"Stryker was here!\"",
+   "line": 300,
+   "mutator": "StringLiteral",
+   "filing": "equivalent",
+   "evidence": "The default only feeds tomlStringList, which returns null for any string not starting with \"[\", so \"\" and \"Stryker was here!\" both yield null and the loop continues. Measured: byte-identical Derivations across 29 projects. Positive control on the same expression — default replaced by `[\"0 9 * * *\"]` — moved 58 diff lines on the fixture holding a `[triggers]` table with no `crons` key, proving the branch is reached and sensitive.",
+   "argument": "The default only feeds tomlStringList, which returns null for any string not starting with \"[\", so \"\" and \"Stryker was here!\" both yield null and the loop continues. Measured: byte-identical Derivations across 29 projects. Positive control on the same expression — default replaced by `[\"0 9 * * *\"]` — moved 58 diff lines on the fixture holding a `[triggers]` table with no `crons` key, proving the branch is reached and sensitive.",
+   "stableKey": "territory\u0001readOneWrangler\u0001StringLiteral\u0001\"Stryker was here!\"\u0001\"\"\u0001const crons = tomlStringList(kv.get(\"crons\") ?? \"\");"
+  },
+  {
+   "key": "344|13|344|43|ConditionalExpression|true",
+   "line": 344,
+   "mutator": "ConditionalExpression",
+   "filing": "equivalent",
+   "evidence": "Instrumented the loop and enumerated every value that reaches `Object.entries(tree.env)` across the fixtures — null, boolean, number, empty string, non-empty string, array, object. Every value the guard REJECTS has neither an array at `?.triggers?.crons` nor one at `?.queues?.consumers`, so admitting them emits nothing and notes nothing; the seven JSON value kinds are exhaustive since the tree comes from JSON.parse. Derivations byte-identical over 29 projects; positive control `if (false)` on the same line moved 115 diff lines.",
+   "argument": "Instrumented the loop and enumerated every value that reaches `Object.entries(tree.env)` across the fixtures — null, boolean, number, empty string, non-empty string, array, object. Every value the guard REJECTS has neither an array at `?.triggers?.crons` nor one at `?.queues?.consumers`, so admitting them emits nothing and notes nothing; the seven JSON value kinds are exhaustive since the tree comes from JSON.parse. Derivations byte-identical over 29 projects; positive control `if (false)` on the same line moved 115 diff lines.",
+   "stableKey": "territory\u0001readOneWrangler\u0001ConditionalExpression\u0001true\u0001cfg && typeof cfg === \"object\"\u0001if (cfg && typeof cfg === \"object\")"
+  },
+  {
+   "key": "344|13|344|43|LogicalOperator|cfg || typeof cfg === \"object\"",
+   "line": 344,
+   "mutator": "LogicalOperator",
+   "filing": "equivalent",
+   "evidence": "`cfg || typeof cfg === \"object\"` additionally admits truthy scalars (42, true, \"triggers\") and null, and rejects nothing the original admitted. The instrumented enumeration shows each of those values carries no array at `?.triggers?.crons` or `?.queues?.consumers`, so they contribute no binding and no note. Derivations byte-identical over 29 projects; positive control `if (false)` on the same line moved 115 diff lines.",
+   "argument": "`cfg || typeof cfg === \"object\"` additionally admits truthy scalars (42, true, \"triggers\") and null, and rejects nothing the original admitted. The instrumented enumeration shows each of those values carries no array at `?.triggers?.crons` or `?.queues?.consumers`, so they contribute no binding and no note. Derivations byte-identical over 29 projects; positive control `if (false)` on the same line moved 115 diff lines.",
+   "stableKey": "territory\u0001readOneWrangler\u0001LogicalOperator\u0001cfg || typeof cfg === \"object\"\u0001cfg && typeof cfg === \"object\"\u0001if (cfg && typeof cfg === \"object\")"
+  },
+  {
+   "key": "344|20|344|43|ConditionalExpression|true",
+   "line": 344,
+   "mutator": "ConditionalExpression",
+   "filing": "equivalent",
+   "evidence": "`cfg && true` admits every truthy env value including scalars; the instrumented enumeration over null/boolean/number/string/array/object shows every newly admitted value yields no crons array and no consumers array, hence no emit and no note. Derivations byte-identical over 29 projects; positive control `if (false)` on the same line moved 115 diff lines.",
+   "argument": "`cfg && true` admits every truthy env value including scalars; the instrumented enumeration over null/boolean/number/string/array/object shows every newly admitted value yields no crons array and no consumers array, hence no emit and no note. Derivations byte-identical over 29 projects; positive control `if (false)` on the same line moved 115 diff lines.",
+   "stableKey": "territory\u0001readOneWrangler\u0001ConditionalExpression\u0001true\u0001typeof cfg === \"object\"\u0001if (cfg && typeof cfg === \"object\")"
+  },
+  {
+   "key": "348|23|348|36|OptionalChaining|cfg.triggers",
+   "line": 348,
+   "mutator": "OptionalChaining",
+   "filing": "equivalent",
+   "evidence": "Instrumented the `for (const [envName, cfg] of scopes)` loop and logged every cfg over the fixtures: 17 iterations, all `typeof cfg === \"object\"` and none null. The root scope is the tree, already proven a non-null object by the guard at line 329, and the env scopes are filtered by `cfg && typeof cfg === \"object\"`, so `cfg.triggers` can never throw. Derivations byte-identical over 29 projects.",
+   "argument": "Instrumented the `for (const [envName, cfg] of scopes)` loop and logged every cfg over the fixtures: 17 iterations, all `typeof cfg === \"object\"` and none null. The root scope is the tree, already proven a non-null object by the guard at line 329, and the env scopes are filtered by `cfg && typeof cfg === \"object\"`, so `cfg.triggers` can never throw. Derivations byte-identical over 29 projects.",
+   "stableKey": "territory\u0001readOneWrangler\u0001OptionalChaining\u0001cfg.triggers\u0001cfg?.triggers\u0001const crons = cfg?.triggers?.crons;"
+  },
+  {
+   "key": "357|27|357|38|OptionalChaining|cfg.queues",
+   "line": 357,
+   "mutator": "OptionalChaining",
+   "filing": "equivalent",
+   "evidence": "Same instrumented measurement: cfg is a non-null object on all 17 scope iterations observed, so `cfg.queues` cannot throw where `cfg?.queues` was needed. Derivations byte-identical over 29 projects, including fixtures whose env map holds null and scalars.",
+   "argument": "Same instrumented measurement: cfg is a non-null object on all 17 scope iterations observed, so `cfg.queues` cannot throw where `cfg?.queues` was needed. Derivations byte-identical over 29 projects, including fixtures whose env map holds null and scalars.",
+   "stableKey": "territory\u0001readOneWrangler\u0001OptionalChaining\u0001cfg.queues\u0001cfg?.queues\u0001if (Array.isArray(cfg?.queues?.consumers) && cfg.queues.consumers.length > 0) {"
+  },
+  {
+   "key": "361|31|361|50|ConditionalExpression|true",
+   "line": 361,
+   "mutator": "ConditionalExpression",
+   "filing": "hole",
+   "evidence": "`bindings.some((b) => true)` asks whether ANY manifest has bound something, not whether THIS one did, and `bindings` accumulates across manifests. Measured on a project holding `wrangler.a.toml` (declares crons) and `wrangler.b.json` (declares nothing): the delivered code emits `no schedule or queue consumer declared` for wrangler.b.json, the mutant emits nothing at all — the second Worker's silence becomes indistinguishable from an unexamined file.",
+   "argument": "`bindings.some((b) => true)` asks whether ANY manifest has bound something, not whether THIS one did, and `bindings` accumulates across manifests. Measured on a project holding `wrangler.a.toml` (declares crons) and `wrangler.b.json` (declares nothing): the delivered code emits `no schedule or queue consumer declared` for wrangler.b.json, the mutant emits nothing at all — the second Worker's silence becomes indistinguishable from an unexamined file.",
+   "stableKey": "territory\u0001readOneWrangler\u0001ConditionalExpression\u0001true\u0001b.via.file === file\u0001if (!bindings.some((b) => b.via.file === file) && notes.length === 0)"
+  }
+ ]
+}

@@ -1,8 +1,11 @@
 ---
 title: Retryable vs Non-Retryable Errors
+phases: [govern]
+requires: junit
 impact: MEDIUM
 impactDescription: Prevents wasted retries and ensures quick failure for unrecoverable errors
 tags: [resilience, error-handling, llm]
+noTerritory: It is an error-classification discipline, valid everywhere an external call fails, with no identifiable class of files.
 ---
 
 ## Retryable vs Non-Retryable Errors

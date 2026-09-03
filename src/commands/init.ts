@@ -1,9 +1,11 @@
 import { join, resolve } from "node:path";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { checkbox, input, select } from "@inquirer/prompts";
+import { existingSkillDirs, skillsForDir } from "../lib/tools.js";
 import { TEMPLATES, EXAMPLE_MISSION, EXAMPLE_CODE, MISSION_LAYOUT, VERSION } from "../lib/paths.js";
 import { TOOL_PROFILES, TOOL_IDS, baselineSkills } from "../lib/tools.js";
 import { makeWriter } from "../lib/write.js";
+import { hashText, renderScaffoldLock, SCAFFOLD_LOCK } from "../lib/scaffold-lock.js";
 import { checkCommand } from "./check.js";
 import { c, createHeader, isNonInteractive, section, status } from "../lib/styles.js";
 
@@ -19,7 +21,11 @@ type Writer = ReturnType<typeof makeWriter>;
 /** Recursively copy a shipped directory tree (used to lay down the filled reference mission). */
 const COPY_SKIP = new Set(["node_modules", "package-lock.json", ".DS_Store"]);
 function copyTree(w: Writer, srcDir: string, destDir: string): void {
-  for (const entry of readdirSync(srcDir, { withFileTypes: true })) {
+  // Sorted, so the same package writes the same transcript on every filesystem: a directory
+  // reader follows the OS's own order (APFS byte order vs NTFS case-folded order), and the first
+  // CI run of the init golden caught adapters/README.md printed in two different positions on two
+  // legs of one commit — RWD-2026-0091's phenomenon, one command over (RWD-2026-0101).
+  for (const entry of [...readdirSync(srcDir, { withFileTypes: true })].sort((a, b) => (a.name < b.name ? -1 : 1))) {
     if (COPY_SKIP.has(entry.name)) continue;
     const src = join(srcDir, entry.name);
     const dest = join(destDir, entry.name);
@@ -120,18 +126,18 @@ export async function initCommand(opts: InitOptions): Promise<void> {
   }
 
   console.log(section("Workflows"));
-  for (const wf of readdirSync(join(TEMPLATES, "workflows"))) {
+  for (const wf of readdirSync(join(TEMPLATES, "workflows")).sort()) {
     w.copy(join(TEMPLATES, "workflows", wf), join(mission, "workflows", wf));
   }
 
   console.log(section("Craft rules"));
-  const rules = readdirSync(join(TEMPLATES, "rules"));
+  const rules = readdirSync(join(TEMPLATES, "rules")).sort();
   for (const r of rules) {
     w.copy(join(TEMPLATES, "rules", r), join(mission, "rules", r));
   }
 
   console.log(section("Gate adapters"));
-  for (const a of readdirSync(join(TEMPLATES, "adapters"))) {
+  for (const a of readdirSync(join(TEMPLATES, "adapters")).sort()) {
     w.copy(join(TEMPLATES, "adapters", a), join(mission, "adapters", a));
   }
 
@@ -144,7 +150,28 @@ export async function initCommand(opts: InitOptions): Promise<void> {
 
   for (const profile of TOOL_PROFILES.filter((p) => tools.includes(p.id))) {
     console.log(section(`Profile · ${profile.label}`));
+    if (profile.note) console.log("  " + status.warning(profile.note));
     for (const f of profile.files(root)) w.write(f.path, f.content);
+  }
+
+  // Record what was scaffolded, so a later `update` can tell an UPSTREAM change from a local edit.
+  // Without it, every release that touches a shipped rule reports "locally modified" on files the
+  // operator never opened, and withholds the refresh behind --force.
+  //
+  // Written HERE, after the skills and the tool profiles, and not with the rules: the skill keys
+  // are discovered on disk, so recording them before they exist silently recorded nothing. That
+  // is how they escaped the lock in the first place.
+  {
+    const files: Record<string, string> = {};
+    for (const dir of ["workflows", "rules", "adapters"] as const) {
+      for (const f of readdirSync(join(TEMPLATES, dir)).sort()) {
+        files[`${dir}/${f}`] = hashText(readFileSync(join(TEMPLATES, dir, f), "utf8"));
+      }
+    }
+    for (const rel of existingSkillDirs(root)) {
+      for (const f of skillsForDir(root, rel)) files[f.key] = hashText(f.content);
+    }
+    w.write(join(mission, SCAFFOLD_LOCK), renderScaffoldLock(VERSION, files));
   }
 
   // ── Summary ───────────────────────────────────────────────────────
@@ -163,6 +190,12 @@ ${c.gray("Start your own mission with")} ${c.primary("runward init")} ${c.gray("
     if (!dryRun) {
       console.log();
       await checkCommand({ path: dir, strict: true });
+      // The LAST lines on a screen are the ones a new operator acts on, and the self-audit above
+      // ends with check's own "Next" — assemble a compliance pack — which is the right gesture for
+      // a crossed mission and the wrong first contact with the product. Measured 2026-09-02: the
+      // demo instruction sat at line 158 of a 249-line first screen, and the screen's final advice
+      // was a regime pack. Repeat the first real gesture where the eye actually is (QW2).
+      console.log(`\n${c.primaryBold("First gesture")}\n  ${c.primary("cd code && npm install && npm run demo")} ${c.gray("— watch the deterministic guard refuse a fabricated value. Then break the mission and watch the gate catch it: docs/first-mission.md walks it in 15 minutes.")}`);
     }
   } else {
     console.log(`

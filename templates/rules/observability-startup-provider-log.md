@@ -1,8 +1,11 @@
 ---
 title: Log Providers at Startup
+phases: [floor]
 impact: LOW
 impactDescription: Simplifies debugging by showing configuration at startup
 tags: [observability, configuration, debugging]
+appliesTo: [**/startup.ts, **/app.ts, **/src/index.ts]
+governs: [startup]
 ---
 
 ## Log Providers at Startup
@@ -74,7 +77,6 @@ logStartupConfig();
   auth: 'configured-provider',
   search: 'web-search',
   memory: 'configured-provider',
-  realtime: true,
   realtime: true
 }
 [CONFIG] Database: { postgres: true, graph: true, redis: true }

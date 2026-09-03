@@ -1,0 +1,42 @@
+{
+ "function": "deriveCloudflareWorkers",
+ "probeMissions": [],
+ "verdicts": [
+  {
+   "key": "220|17|220|88|MethodExpression|readdirSync(projectRoot).filter(f => WRANGLER_PATTERN.test(f))",
+   "line": 220,
+   "mutator": "MethodExpression",
+   "filing": "hole",
+   "evidence": "Without `.sort()` the manifest read order, hence the order of `derivation.notes`, follows the filesystem. Measured with `fs.readdirSync` patched to return reverse order before the ESM binding: baseline notes stay `[aaa read, mmm read, zzz unread]`, the mutant emits `[zzz unread, mmm read, aaa read]`. The machine emission stops being comparable from one filesystem to another.",
+   "argument": "Without `.sort()` the manifest read order, hence the order of `derivation.notes`, follows the filesystem. Measured with `fs.readdirSync` patched to return reverse order before the ESM binding: baseline notes stay `[aaa read, mmm read, zzz unread]`, the mutant emits `[zzz unread, mmm read, aaa read]`. The machine emission stops being comparable from one filesystem to another.",
+   "stableKey": "territory\u0001deriveCloudflareWorkers\u0001MethodExpression\u0001readdirSync(projectRoot).filter(f => WRANGLER_PATTERN.test(f))\u0001readdirSync(projectRoot).filter((f) => WRANGLER_PATTERN.test(f)).sort()\u0001found = readdirSync(projectRoot).filter((f) => WRANGLER_PATTERN.test(f)).sort();"
+  },
+  {
+   "key": "223|40|223|122|ObjectLiteral|{}",
+   "line": 223,
+   "mutator": "ObjectLiteral",
+   "filing": "hole",
+   "evidence": "The note becomes `{}`. Measured on the chmod 0111 mission through `rules --for --json`: `derivation.notes[0]` loses `adapter`, `file`, `outcome` and `detail`; the human line renders `undefined · — · undefined: undefined`. The refusal is counted but carries no content.",
+   "argument": "The note becomes `{}`. Measured on the chmod 0111 mission through `rules --for --json`: `derivation.notes[0]` loses `adapter`, `file`, `outcome` and `detail`; the human line renders `undefined · — · undefined: undefined`. The refusal is counted but carries no content.",
+   "stableKey": "territory\u0001deriveCloudflareWorkers\u0001ObjectLiteral\u0001{}\u0001{ adapter, file: null, outcome: \"absent\", detail: \"project root is not readable\" }\u0001return { bindings: [], notes: [{ adapter, file: null, outcome: \"absent\", detail: \"project root is not readable\" }] };"
+  },
+  {
+   "key": "241|9|241|25|ConditionalExpression|true",
+   "line": 241,
+   "mutator": "ConditionalExpression",
+   "filing": "equivalent",
+   "evidence": "When `contested` is empty the guarded block is a no-op: `filter(b => !contested.includes(b.path))` is the identity and the `for (const p of contested)` body never runs. Measured: with `if (true)` the deriveAll/deriveCloudflareWorkers JSON is byte-identical over 12 hand-built wrangler projects, 4 real `rules --for --json` runs (contested mission, multi-entry mission, unreadable root, the runward repo) and 123 randomly generated projects (4591 bindings).",
+   "argument": "When `contested` is empty the guarded block is a no-op: `filter(b => !contested.includes(b.path))` is the identity and the `for (const p of contested)` body never runs. Measured: with `if (true)` the deriveAll/deriveCloudflareWorkers JSON is byte-identical over 12 hand-built wrangler projects, 4 real `rules --for --json` runs (contested mission, multi-entry mission, unreadable root, the runward repo) and 123 randomly generated projects (4591 bindings).",
+   "stableKey": "territory\u0001deriveCloudflareWorkers\u0001ConditionalExpression\u0001true\u0001contested.length\u0001if (contested.length) {"
+  },
+  {
+   "key": "244|45|244|71|MethodExpression|[...byEntry.get(p)]",
+   "line": 244,
+   "mutator": "MethodExpression",
+   "filing": "equivalent",
+   "evidence": "The Set is filled by iterating `all.bindings`, which are pushed file by file in `found` order, and `found` is already `.sort()`ed, so the spread is monotone and `.sort()` is a no-op. Measured: the ambiguous note's `file` field is byte-identical on contested fixtures with 2, 3 and 6 manifests, both with the native readdir and with an `fs.readdirSync` patched (via `node -r`, before the ESM binding) to return reverse order.",
+   "argument": "The Set is filled by iterating `all.bindings`, which are pushed file by file in `found` order, and `found` is already `.sort()`ed, so the spread is monotone and `.sort()` is a no-op. Measured: the ambiguous note's `file` field is byte-identical on contested fixtures with 2, 3 and 6 manifests, both with the native readdir and with an `fs.readdirSync` patched (via `node -r`, before the ESM binding) to return reverse order.",
+   "stableKey": "territory\u0001deriveCloudflareWorkers\u0001MethodExpression\u0001[...byEntry.get(p)]\u0001[...byEntry.get(p)].sort()\u0001all.notes.push({ adapter, file: [...byEntry.get(p)].sort().join(\", \"), outcome: \"ambiguous\","
+  }
+ ]
+}

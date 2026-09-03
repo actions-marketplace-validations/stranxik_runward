@@ -9,10 +9,10 @@
       "props": [
         {
           "name": "runward-regime-lens",
-          "value": "eu-ai-act@2024-1689"
+          "value": "eu-ai-act@2026-1744"
         }
       ],
-      "remarks": "Assessment-readiness DRAFT, assembled deterministically by runward from ratified engineering artifacts (rule to OWASP ASI mapping, conformance manifest, ADR journal). Supporting evidence only — NOT a compliance claim, NOT a certification, NOT a conformity assessment. Applicability, risk acceptance and management sign-off are the operator's."
+      "remarks": "Assessment-readiness DRAFT, assembled deterministically by runward from ratified engineering artifacts (rule to OWASP ASI mapping, conformance manifest, ADR journal). Supporting evidence only — NOT a compliance claim, NOT a certification, NOT a conformity assessment. Applicability, risk acceptance and management sign-off are the operator's. DECLARED NON-SCOPE OF EVERY GREEN ROW (ADR-0040): A green row proves a decision was traced to resolving, non-empty (and, if signed, shape-matching) evidence. It never proves the evidence truly implements the rule: the gate reads bytes at rest — it does not execute project code, run tests, or judge semantics. That judgment stays with the operator at the gate (ADR-0001, ADR-0005). Nor does a green row travel forward in time: the operator's judgment was made about the code that existed when the row was written. Every run re-verifies that the cited evidence still resolves and (if sealed) has not drifted, but code added later under the same rule is never re-judged — the gate has no signal that new work fell under an already-accounted-for rule. Confront the rules at the point of action, not only at the crossing. A ratification trace proves a human answered the displayed evidence; it does not prove they understood it."
     },
     "components": [
       {
@@ -34,6 +34,18 @@
                   {
                     "name": "implementation-status",
                     "value": "partial"
+                  },
+                  {
+                    "name": "runward-gate-non-scope",
+                    "value": "A green row proves a decision was traced to resolving, non-empty (and, if signed, shape-matching) evidence. It never proves the evidence truly implements the rule: the gate reads bytes at rest — it does not execute project code, run tests, or judge semantics. That judgment stays with the operator at the gate (ADR-0001, ADR-0005). Nor does a green row travel forward in time: the operator's judgment was made about the code that existed when the row was written. Every run re-verifies that the cited evidence still resolves and (if sealed) has not drifted, but code added later under the same rule is never re-judged — the gate has no signal that new work fell under an already-accounted-for rule. Confront the rules at the point of action, not only at the crossing. A ratification trace proves a human answered the displayed evidence; it does not prove they understood it."
+                  },
+                  {
+                    "name": "runward-gate-verdict",
+                    "value": "gaps (--strict, exit 1, 46 conformance gap(s))"
+                  },
+                  {
+                    "name": "runward-evidence-depth",
+                    "value": "3 rule(s) mapped, none accounted for in a manifest yet — nothing was opened"
                   }
                 ],
                 "links": [
@@ -52,6 +64,18 @@
                   {
                     "name": "implementation-status",
                     "value": "partial"
+                  },
+                  {
+                    "name": "runward-gate-non-scope",
+                    "value": "A green row proves a decision was traced to resolving, non-empty (and, if signed, shape-matching) evidence. It never proves the evidence truly implements the rule: the gate reads bytes at rest — it does not execute project code, run tests, or judge semantics. That judgment stays with the operator at the gate (ADR-0001, ADR-0005). Nor does a green row travel forward in time: the operator's judgment was made about the code that existed when the row was written. Every run re-verifies that the cited evidence still resolves and (if sealed) has not drifted, but code added later under the same rule is never re-judged — the gate has no signal that new work fell under an already-accounted-for rule. Confront the rules at the point of action, not only at the crossing. A ratification trace proves a human answered the displayed evidence; it does not prove they understood it."
+                  },
+                  {
+                    "name": "runward-gate-verdict",
+                    "value": "gaps (--strict, exit 1, 46 conformance gap(s))"
+                  },
+                  {
+                    "name": "runward-evidence-depth",
+                    "value": "7 rule(s) mapped, none accounted for in a manifest yet — nothing was opened"
                   }
                 ],
                 "links": [
@@ -70,6 +94,18 @@
                   {
                     "name": "implementation-status",
                     "value": "partial"
+                  },
+                  {
+                    "name": "runward-gate-non-scope",
+                    "value": "A green row proves a decision was traced to resolving, non-empty (and, if signed, shape-matching) evidence. It never proves the evidence truly implements the rule: the gate reads bytes at rest — it does not execute project code, run tests, or judge semantics. That judgment stays with the operator at the gate (ADR-0001, ADR-0005). Nor does a green row travel forward in time: the operator's judgment was made about the code that existed when the row was written. Every run re-verifies that the cited evidence still resolves and (if sealed) has not drifted, but code added later under the same rule is never re-judged — the gate has no signal that new work fell under an already-accounted-for rule. Confront the rules at the point of action, not only at the crossing. A ratification trace proves a human answered the displayed evidence; it does not prove they understood it."
+                  },
+                  {
+                    "name": "runward-gate-verdict",
+                    "value": "gaps (--strict, exit 1, 46 conformance gap(s))"
+                  },
+                  {
+                    "name": "runward-evidence-depth",
+                    "value": "3 rule(s) mapped, none accounted for in a manifest yet — nothing was opened"
                   }
                 ],
                 "links": [
@@ -83,11 +119,23 @@
               {
                 "uuid": "20974419-5872-5ac6-a46f-ad3e02f9f8f1",
                 "control-id": "asi-04",
-                "description": "ASI04 Agentic Supply Chain Vulnerabilities. Addressed by rules: contracts-governance, resilience-multi-provider-fallback, security-mcp-server-pinning, security-tool-change-reapproval.",
+                "description": "ASI04 Agentic Supply Chain Vulnerabilities. Addressed by rules: contracts-governance, hexa-typescript-native, resilience-multi-provider-fallback, security-mcp-server-pinning, security-tool-change-reapproval, topology-trace-export-decision.",
                 "props": [
                   {
                     "name": "implementation-status",
                     "value": "partial"
+                  },
+                  {
+                    "name": "runward-gate-non-scope",
+                    "value": "A green row proves a decision was traced to resolving, non-empty (and, if signed, shape-matching) evidence. It never proves the evidence truly implements the rule: the gate reads bytes at rest — it does not execute project code, run tests, or judge semantics. That judgment stays with the operator at the gate (ADR-0001, ADR-0005). Nor does a green row travel forward in time: the operator's judgment was made about the code that existed when the row was written. Every run re-verifies that the cited evidence still resolves and (if sealed) has not drifted, but code added later under the same rule is never re-judged — the gate has no signal that new work fell under an already-accounted-for rule. Confront the rules at the point of action, not only at the crossing. A ratification trace proves a human answered the displayed evidence; it does not prove they understood it."
+                  },
+                  {
+                    "name": "runward-gate-verdict",
+                    "value": "gaps (--strict, exit 1, 46 conformance gap(s))"
+                  },
+                  {
+                    "name": "runward-evidence-depth",
+                    "value": "6 rule(s) mapped, none accounted for in a manifest yet — nothing was opened"
                   }
                 ],
                 "links": [
@@ -106,6 +154,18 @@
                   {
                     "name": "implementation-status",
                     "value": "partial"
+                  },
+                  {
+                    "name": "runward-gate-non-scope",
+                    "value": "A green row proves a decision was traced to resolving, non-empty (and, if signed, shape-matching) evidence. It never proves the evidence truly implements the rule: the gate reads bytes at rest — it does not execute project code, run tests, or judge semantics. That judgment stays with the operator at the gate (ADR-0001, ADR-0005). Nor does a green row travel forward in time: the operator's judgment was made about the code that existed when the row was written. Every run re-verifies that the cited evidence still resolves and (if sealed) has not drifted, but code added later under the same rule is never re-judged — the gate has no signal that new work fell under an already-accounted-for rule. Confront the rules at the point of action, not only at the crossing. A ratification trace proves a human answered the displayed evidence; it does not prove they understood it."
+                  },
+                  {
+                    "name": "runward-gate-verdict",
+                    "value": "gaps (--strict, exit 1, 46 conformance gap(s))"
+                  },
+                  {
+                    "name": "runward-evidence-depth",
+                    "value": "1 rule(s) mapped, none accounted for in a manifest yet — nothing was opened"
                   }
                 ],
                 "links": [
@@ -124,6 +184,18 @@
                   {
                     "name": "implementation-status",
                     "value": "partial"
+                  },
+                  {
+                    "name": "runward-gate-non-scope",
+                    "value": "A green row proves a decision was traced to resolving, non-empty (and, if signed, shape-matching) evidence. It never proves the evidence truly implements the rule: the gate reads bytes at rest — it does not execute project code, run tests, or judge semantics. That judgment stays with the operator at the gate (ADR-0001, ADR-0005). Nor does a green row travel forward in time: the operator's judgment was made about the code that existed when the row was written. Every run re-verifies that the cited evidence still resolves and (if sealed) has not drifted, but code added later under the same rule is never re-judged — the gate has no signal that new work fell under an already-accounted-for rule. Confront the rules at the point of action, not only at the crossing. A ratification trace proves a human answered the displayed evidence; it does not prove they understood it."
+                  },
+                  {
+                    "name": "runward-gate-verdict",
+                    "value": "gaps (--strict, exit 1, 46 conformance gap(s))"
+                  },
+                  {
+                    "name": "runward-evidence-depth",
+                    "value": "5 rule(s) mapped, none accounted for in a manifest yet — nothing was opened"
                   }
                 ],
                 "links": [
@@ -142,6 +214,18 @@
                   {
                     "name": "implementation-status",
                     "value": "partial"
+                  },
+                  {
+                    "name": "runward-gate-non-scope",
+                    "value": "A green row proves a decision was traced to resolving, non-empty (and, if signed, shape-matching) evidence. It never proves the evidence truly implements the rule: the gate reads bytes at rest — it does not execute project code, run tests, or judge semantics. That judgment stays with the operator at the gate (ADR-0001, ADR-0005). Nor does a green row travel forward in time: the operator's judgment was made about the code that existed when the row was written. Every run re-verifies that the cited evidence still resolves and (if sealed) has not drifted, but code added later under the same rule is never re-judged — the gate has no signal that new work fell under an already-accounted-for rule. Confront the rules at the point of action, not only at the crossing. A ratification trace proves a human answered the displayed evidence; it does not prove they understood it."
+                  },
+                  {
+                    "name": "runward-gate-verdict",
+                    "value": "gaps (--strict, exit 1, 46 conformance gap(s))"
+                  },
+                  {
+                    "name": "runward-evidence-depth",
+                    "value": "1 rule(s) mapped, none accounted for in a manifest yet — nothing was opened"
                   }
                 ],
                 "links": [
@@ -155,11 +239,23 @@
               {
                 "uuid": "e120bd5b-6f52-5a96-89d7-779441d5b99e",
                 "control-id": "asi-08",
-                "description": "ASI08 Cascading Failures. Addressed by rules: async-job-guardrails, checklist-pre-production-resilience, eval-loop, handover-runbook-executable, resilience-fail-open, resilience-multi-provider-fallback, resilience-retry-backoff, scaling-distributed-rate-limiting.",
+                "description": "ASI08 Cascading Failures. Addressed by rules: async-job-guardrails, checklist-pre-production-resilience, eval-loop, handover-runbook-executable, provider-no-crash-missing-env, resilience-fail-open, resilience-multi-provider-fallback, resilience-retry-backoff, scaling-distributed-rate-limiting.",
                 "props": [
                   {
                     "name": "implementation-status",
                     "value": "partial"
+                  },
+                  {
+                    "name": "runward-gate-non-scope",
+                    "value": "A green row proves a decision was traced to resolving, non-empty (and, if signed, shape-matching) evidence. It never proves the evidence truly implements the rule: the gate reads bytes at rest — it does not execute project code, run tests, or judge semantics. That judgment stays with the operator at the gate (ADR-0001, ADR-0005). Nor does a green row travel forward in time: the operator's judgment was made about the code that existed when the row was written. Every run re-verifies that the cited evidence still resolves and (if sealed) has not drifted, but code added later under the same rule is never re-judged — the gate has no signal that new work fell under an already-accounted-for rule. Confront the rules at the point of action, not only at the crossing. A ratification trace proves a human answered the displayed evidence; it does not prove they understood it."
+                  },
+                  {
+                    "name": "runward-gate-verdict",
+                    "value": "gaps (--strict, exit 1, 46 conformance gap(s))"
+                  },
+                  {
+                    "name": "runward-evidence-depth",
+                    "value": "9 rule(s) mapped, none accounted for in a manifest yet — nothing was opened"
                   }
                 ],
                 "links": [
@@ -178,6 +274,18 @@
                   {
                     "name": "implementation-status",
                     "value": "partial"
+                  },
+                  {
+                    "name": "runward-gate-non-scope",
+                    "value": "A green row proves a decision was traced to resolving, non-empty (and, if signed, shape-matching) evidence. It never proves the evidence truly implements the rule: the gate reads bytes at rest — it does not execute project code, run tests, or judge semantics. That judgment stays with the operator at the gate (ADR-0001, ADR-0005). Nor does a green row travel forward in time: the operator's judgment was made about the code that existed when the row was written. Every run re-verifies that the cited evidence still resolves and (if sealed) has not drifted, but code added later under the same rule is never re-judged — the gate has no signal that new work fell under an already-accounted-for rule. Confront the rules at the point of action, not only at the crossing. A ratification trace proves a human answered the displayed evidence; it does not prove they understood it."
+                  },
+                  {
+                    "name": "runward-gate-verdict",
+                    "value": "gaps (--strict, exit 1, 46 conformance gap(s))"
+                  },
+                  {
+                    "name": "runward-evidence-depth",
+                    "value": "2 rule(s) mapped, none accounted for in a manifest yet — nothing was opened"
                   }
                 ],
                 "links": [
@@ -196,6 +304,18 @@
                   {
                     "name": "implementation-status",
                     "value": "partial"
+                  },
+                  {
+                    "name": "runward-gate-non-scope",
+                    "value": "A green row proves a decision was traced to resolving, non-empty (and, if signed, shape-matching) evidence. It never proves the evidence truly implements the rule: the gate reads bytes at rest — it does not execute project code, run tests, or judge semantics. That judgment stays with the operator at the gate (ADR-0001, ADR-0005). Nor does a green row travel forward in time: the operator's judgment was made about the code that existed when the row was written. Every run re-verifies that the cited evidence still resolves and (if sealed) has not drifted, but code added later under the same rule is never re-judged — the gate has no signal that new work fell under an already-accounted-for rule. Confront the rules at the point of action, not only at the crossing. A ratification trace proves a human answered the displayed evidence; it does not prove they understood it."
+                  },
+                  {
+                    "name": "runward-gate-verdict",
+                    "value": "gaps (--strict, exit 1, 46 conformance gap(s))"
+                  },
+                  {
+                    "name": "runward-evidence-depth",
+                    "value": "4 rule(s) mapped, none accounted for in a manifest yet — nothing was opened"
                   }
                 ],
                 "links": [

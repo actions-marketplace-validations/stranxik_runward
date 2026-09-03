@@ -1,8 +1,11 @@
 ---
 title: Codebase Metrics Thresholds
+phases: [govern]
+requires: eslint
 impact: MEDIUM
 impactDescription: Identifies code quality issues before they become problems
 tags: [quality, metrics, maintainability]
+noTerritory: These are health thresholds measured across the whole codebase and enforced in CI and review, so they hold for every source file without a territory of their own.
 ---
 
 ## Codebase Metrics Thresholds
@@ -69,7 +72,7 @@ function reportIssues(metrics: FileMetrics[]): void {
       issues.push(`${file.path}: ${file.lines} lines (warning > 300)`);
     }
 
-    if (file.switchCases > 20) {
+    if (file.switchCases > 10) {
       issues.push(`${file.path}: ${file.switchCases} switch cases - use registry pattern`);
     }
 
@@ -83,7 +86,7 @@ function reportIssues(metrics: FileMetrics[]): void {
     issues.forEach(i => console.log(i));
     process.exit(1);  // Fail CI
   } else {
-    console.log('yes No codebase issues found');
+    console.log('✓ No codebase issues found');
   }
 }
 ```

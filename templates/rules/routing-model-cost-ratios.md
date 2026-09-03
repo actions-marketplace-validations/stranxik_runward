@@ -1,8 +1,11 @@
 ---
 title: Model Cost Ratios
+noAsi: cost arbitration; no agentic-security surface.
+noPhase: A reference table of illustrative orders of magnitude that informs routing decisions — a table is read, not applied, and there is nothing a manifest row could honestly point at
 impact: HIGH
 impactDescription: Essential reference for cost optimization decisions
 tags: [routing, llm, cost-optimization, reference]
+noTerritory: It is a cost reference table informing every model and prompt decision, prescribing and constraining no file.
 ---
 
 ## Model Cost Ratios

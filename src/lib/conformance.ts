@@ -1,8 +1,10 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { resolveEvidencePath } from "./evidence.js";
 import { join, dirname } from "node:path";
 import { TEMPLATES } from "./paths.js";
-import { EXPECTED_MAPPED } from "./constants.js";
-import { RULE_MIGRATIONS } from "./rule-migrations.js";
+import { EXPECTED_MAPPED, ADR_MIN_CHARS } from "./constants.js";
+import { ruleMigrations } from "./rule-migrations.js";
+import { adrStatusLine } from "./mission.js";
 
 /**
  * Rule-conformance verification (the --strict gate).
@@ -16,7 +18,10 @@ import { RULE_MIGRATIONS } from "./rule-migrations.js";
  */
 
 export interface ManifestRow { rule: string; status: string; evidence: string; }
-export interface Violation { rule: string; problem: string; }
+export interface Violation { rule: string; problem: string;
+  /** "proposed" marks the ADR-0066 family: refused like every violation, COUNTED apart — the
+   *  summary says "N proposed row(s) awaiting ratification", never a generic conformance gap. */
+  kind?: "proposed"; }
 export interface ConformanceReport { expected: string[]; violations: Violation[] }
 
 /** The gated (phase, deliverable) pairs — the single source `check --strict`, the evidence
@@ -29,13 +34,43 @@ export const GATED_DELIVERABLES: Array<{ phase: string; deliverable: string; lab
   { phase: "handover", deliverable: "handover.md", label: "Handover" },
 ];
 
-const FRONTMATTER = /^---\n([\s\S]*?)\n---/;
-const VALID_STATUS = new Set(["applied", "deviated", "n/a"]);
+const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---/;
+/** The three decisions a conformance row may carry. Exported because evidence.ts has to
+ *  recognise a row of this shape wherever it sits, and a second copy of this list would drift
+ *  the day a fourth status is added. */
+export const VALID_STATUS = new Set(["applied", "deviated", "n/a"]);
+
+/** The proposal grammar (ADR-0066): `proposed:applied | proposed:deviated | proposed:n/a`.
+ *  A prefix on the STATUS, and nothing else, for two measured reasons. It fails closed on every
+ *  deployed binary — `proposed:applied` reads as an invalid status everywhere before 0.38, so no
+ *  mission carrying proposals can pass green on an older runward. And it reuses the product's own
+ *  word for "not yet ratified": the ADR cycle is proposed → accepted, and a row follows the same
+ *  cycle. A fourth column was disqualified by measurement (readManifest folds extra columns into
+ *  Evidence, so an old binary would read `applied` + evidence and pass GREEN); a side ledger was
+ *  disqualified by precedent (ADR-0038: the deliverable IS the state).
+ *  Returns the underlying status a proposal proposes, or null when the status is not a proposal. */
+export function proposedStatus(status: string): string | null {
+  if (!status.startsWith("proposed:")) return null;
+  const rest = status.slice("proposed:".length).trim();
+  return VALID_STATUS.has(rest) ? rest : null;
+}
 
 /** An n/a reason must be more than a placeholder: real length, not a bracketed template token. */
 function trivialReason(s: string): boolean {
   const t = s.trim();
-  return t.length < 8 || /^\[.*\]$/.test(t);
+  if (t.length < 8 || /^\[.*\]$/.test(t)) return true;
+  // A length floor is a floor on KEYSTROKES, not on meaning: `xxxxxxxx` (8) cleared it while
+  // `xxxxxxx` (7) did not, so a manifest whose every n/a said `xxxxxxxx` passed — the cheapest green
+  // mission the 2026-08-26 audit found. What separates that from `no queue` is not word count or
+  // length, both of which refuse `no queue` too and redden an honest mission; it is that one of them
+  // is a single character repeated. Three distinct characters is the floor, which is below every
+  // real reason (the shipped example runs 18 to 28) and above every degenerate one.
+  //
+  // This is a floor on SHAPE, and deliberately not more. An `n/a` cell is prose, the gate does not
+  // read prose (GATE_NON_SCOPE), and `abcdefgh` still clears this. Recorded as a limitation rather
+  // than closed: the only real check on an `n/a` is a human who knows the system.
+  if (new Set(t.toLowerCase().replace(/\s/g, "")).size < 3) return true;
+  return false;
 }
 
 interface RuleMeta { impact: string; phases: string[]; signature: string }
@@ -95,40 +130,151 @@ export function allRules(missionDir: string): string[] {
 
 /** Parse the "## Rule conformance" markdown table from a deliverable. */
 export function parseManifest(content: string): ManifestRow[] {
+  return readManifest(content).rows;
+}
+
+/** The manifest, plus the structural problems that made part of it unreadable.
+ *
+ *  Four ways a manifest could lie about itself, all found by an adversarial audit and all silent:
+ *  a second `## Rule conformance` section above the real one hid it entirely (only the first was
+ *  read); a table inside a ```` ``` ```` fence was parsed as real rows; a `### Sub-heading` after
+ *  the table did not end the section, so a following table was absorbed; and a row without its
+ *  closing pipe — valid GFM, rendered identically — vanished with whatever pointer it carried. */
+export function readManifest(content: string): { rows: ManifestRow[]; problems: string[] } {
   const lines = content.split("\n");
-  const start = lines.findIndex((l) => /^##\s+Rule conformance/i.test(l));
-  if (start === -1) return [];
+  const problems: string[] = [];
+  const heads: number[] = [];
+  let fenced = false;
+  for (let i = 0; i < lines.length; i++) {
+    if (/^\s*(```|~~~)/.test(lines[i])) { fenced = !fenced; continue; }
+    if (!fenced && /^#{1,6}\s+Rule conformance/i.test(lines[i])) heads.push(i);
+  }
+  if (heads.length === 0) return { rows: [], problems };
+  if (heads.length > 1) {
+    // Refuse, never pick. Choosing the first is how an "example of the format" pasted above the
+    // real table made a whole phase invisible while the gate reported it accounted for.
+    problems.push(`${heads.length} \`Rule conformance\` sections in this deliverable (lines ${heads.map((i) => i + 1).join(", ")}) — the gate will not choose between them; keep one`);
+    return { rows: [], problems };
+  }
+
   const rows: ManifestRow[] = [];
-  for (let i = start + 1; i < lines.length; i++) {
+  fenced = false;
+  for (let i = heads[0] + 1; i < lines.length; i++) {
     const line = lines[i];
-    if (/^##\s/.test(line)) break; // next section
-    if (!line.trim().startsWith("|")) continue;
-    const cols = line.split("|").slice(1, -1).map((c) => c.replace(/`/g, "").trim());
-    if (cols.length < 3) continue;
-    // Evidence may itself contain a pipe (a TS union `a | b`, a table hint) — rejoin the
-    // tail so it is not truncated, which would wrongly fail an n/a row on a trivial reason.
+    if (/^\s*(```|~~~)/.test(line)) { fenced = !fenced; continue; }
+    if (fenced) continue;                       // an illustration is not a manifest row
+    if (/^#{1,6}\s/.test(line)) break;           // ANY heading ends the section, not just `##`
+    const t = line.trim();
+    if (!t.startsWith("|")) continue;
+    // GFM makes the closing pipe optional and renders both forms identically. Dropping such a row
+    // silently took its pointer with it; now it is read, and a malformed one is reported.
+    const inner = t.endsWith("|") ? t.slice(1, -1) : t.slice(1);
+    // Backticks are stripped from every column, as they always have been: writing a pointer as a
+    // markdown code-span is the normal thing to do, and `` `file:src/x.ts` `` must resolve. The
+    // consequence is that a backtick can never DELIMIT a quoted symbol — it is gone before the
+    // grammar runs — so the pointer grammar does not offer it. Only `"` delimits.
+    // GFM: `\|` inside a cell is a LITERAL pipe, not a separator. This split treated it as one,
+    // so the scaffold's own illustration row — `| [rule-slug] | applied \| deviated \| n/a | … |` —
+    // parsed as five columns and became a real row whose status is the garbage `applied \`,
+    // published as-is by the ADR-0030 machine payload on every untouched mission (RWD-2026-0097).
+    // The lookbehind leaves one deliberate gap: a cell ENDING in an escaped backslash before a real
+    // separator (`\\|`) keeps its pipe — a shape no manifest has ever carried, accepted over
+    // implementing GFM backslash-run parsing in full.
+    const cols = inner.split(/(?<!\\)\|/).map((c) => c.replace(/\\\|/g, "|").replace(/`/g, "").trim());
+    if (cols.length < 3) {
+      if (!/^:?-+:?$/.test(cols[0] ?? "") && (cols[0] ?? "").trim() && !/^rule$/i.test(cols[0]))
+        problems.push(`line ${i + 1}: a manifest row needs 3 columns (rule | status | evidence) — got ${cols.length}: ${t.slice(0, 70)}`);
+      continue;
+    }
     const rule = cols[0], status = cols[1], evidence = cols.slice(2).join(" | ");
     if (/^rule$/i.test(rule) || /^:?-+:?$/.test(rule)) continue; // header / separator
+    // A bracketed rule name is the template teaching its own format, never a decision: the scaffold
+    // ships `| [rule-slug] | … |` in every gated deliverable, and counting it gave a mission nobody
+    // had touched 5 rows, a shared-cell warning about its own illustration, and garbage in the
+    // machine payload (RWD-2026-0097). Square brackets are already the product's placeholder
+    // vocabulary — the fill heuristic in mission.ts counts the same motif.
+    if (/^\[.*\]$/.test(rule)) continue;
     rows.push({ rule, status: status.toLowerCase(), evidence });
   }
-  return rows;
+  return { rows, problems };
 }
 
 /** True when an ADR with exactly this id (e.g. "ADR-3") exists in runward/adr/.
  *  Anchored on a digit boundary so ADR-1 is not satisfied by ADR-10 / ADR-12
  *  when filenames are unpadded. */
 export function adrIdExists(missionDir: string, id: string): boolean {
+  return adrDecision(missionDir, id) === null;
+}
+
+/** The file behind `adr:NNNN`, or null. Exported so the seal can freeze the target of an `adr:`
+ *  pointer: of the three pointer kinds the grammar announces, it was the only one whose target
+ *  could never be frozen, so the three ADRs a mission's deviations rest on could be replaced with
+ *  filler under an intact seal. The lookup is `adrDecision`'s, not a second one. */
+export function adrFilename(missionDir: string, id: string): string | null {
   const dir = join(missionDir, "adr");
+  if (!existsSync(dir)) return null;
   const u0 = id.toUpperCase();
-  return existsSync(dir) && readdirSync(dir).some((f) => {
+  return readdirSync(dir).find((f) => {
+    const u = f.toUpperCase();
+    return u.startsWith(u0) && !/[0-9]/.test(u.charAt(u0.length));
+  }) ?? null;
+}
+
+/** Why this ADR cannot carry a decision, or null when it can.
+ *
+ *  The evidence layer refuses an empty file outright ("an empty file is not evidence"); the ADR
+ *  layer accepted one as a ratified decision. An audit satisfied 36 deviations with a 0-byte file,
+ *  and 36 more by pointing at `ADR-0000-template.md` — the template runward scaffolds itself and
+ *  nobody ever wrote. A directory named `ADR-0009-…` passed too. The two layers now hold the same
+ *  line: a decision has to have been made by someone. */
+export function adrDecision(missionDir: string, id: string): string | null {
+  const dir = join(missionDir, "adr");
+  if (!existsSync(dir)) return "no runward/adr/ directory";
+  const u0 = id.toUpperCase();
+  const hit = readdirSync(dir).find((f) => {
     const u = f.toUpperCase();
     return u.startsWith(u0) && !/[0-9]/.test(u.charAt(u0.length));
   });
+  if (!hit) return "no matching ADR in runward/adr/";
+  if (/^ADR-0+(?:-|\.md$)/i.test(hit) || /^ADR-0+$/i.test(hit.replace(/\.md$/i, "")))
+    return `${hit} is the scaffolded template, not a decision anyone took`;
+  const abs = join(dir, hit);
+  let text: string;
+  try {
+    if (!statSync(abs).isFile()) return `${hit} is a directory, not a decision`;
+    text = readFileSync(abs, "utf8");
+  } catch { return `${hit} cannot be read`; }
+  if (text.trim().length < ADR_MIN_CHARS) return `${hit} is empty or near-empty — an empty file is not a decision`;
+  // Read the STATUS, not the whole line. Searching anywhere in it refused
+  // `accepted, replacing the proposed ADR-0012` as unratified, and
+  // `accepted (superseded by ADR-0050)` as set-aside — both are accepted decisions whose line
+  // merely mentions another one. The convention across this corpus is that the status is the first
+  // word: `accepted (ratified 2026-07-21 — see Ratification)`.
+  const word = adrStatusWord(text);
+  if (ADR_SET_ASIDE.test(word)) return `${hit} is ${word} — a set-aside decision cannot justify a deviation`;
+  if (ADR_UNRATIFIED.test(word)) return `${hit} is not ratified (${word}) — ratify it, or the deviation rests on nothing`;
+  return null;
 }
 
-function adrExists(missionDir: string, evidence: string): boolean {
+export const ADR_SET_ASIDE = /^(rejected|superseded|withdrawn|obsolete)$/;
+export const ADR_UNRATIFIED = /^(proposed|hypothesis|draft|pending)$/;
+
+/** The first word of an ADR's `**Status**:` line, lower-cased, or "" when there is no such line.
+ *  Exported so the compliance pack cannot answer "is this ratified?" with a second implementation:
+ *  it printed `N ratified ADR(s)` while counting every .md in the directory, ratified or not, and
+ *  that pack is the artifact that leaves the building for a third-party GRC tool. */
+export { adrStatusLine };
+
+export function adrStatusWord(text: string): string {
+  return adrStatusLine(text).toLowerCase().match(/^[a-zà-ÿ]+/)?.[0] ?? "";
+}
+
+/** The reason a `deviated` row's ADR cannot carry it, or null. Returns the precise cause so the
+ *  operator is not left guessing between "wrong number" and "that file is the template". */
+function adrProblem(missionDir: string, evidence: string): string | null {
   const id = evidence.match(/ADR-\d+/i)?.[0];
-  return id ? adrIdExists(missionDir, id) : false;
+  if (!id) return "no ADR referenced — cite the ADR that records the deviation (e.g. ADR-0007)";
+  return adrDecision(missionDir, id);
 }
 
 /**
@@ -204,7 +350,11 @@ export function driftReport(missionDir: string, deliverable: string): Violation[
     if (/\b(?:file|test|adr):\S/.test(row.evidence)) continue; // typed — the evidence layer owns it
     const tokens = row.evidence.match(PATH_TOKEN) ?? [];
     if (tokens.length === 0) continue; // pure prose reference — the operator's judgment
-    const resolves = tokens.some((t) => bases.some((b) => existsSync(join(b, t))));
+    // `existsSync(join(base, token))` had no containment and no symlink resolution, so a path
+    // OUTSIDE the project satisfied this check while the same path written as a typed pointer was
+    // refused. The gate punished precision: an operator in a monorepo who dropped `file:` went
+    // green. One definition of "inside the project", used by both layers.
+    const resolves = tokens.some((t) => resolveEvidencePath(t, bases) !== null);
     if (!resolves) out.push({ rule: row.rule, problem: `applied pointer does not resolve (drift): ${row.evidence} — update the pointer, mark the row deviated with its ADR, or remove it` });
   }
   return out;
@@ -223,7 +373,11 @@ export function conformance(missionDir: string, phaseId: string, deliverable: st
   if (!existsSync(path)) {
     return { expected, violations: expected.map((rule) => ({ rule, problem: `${deliverable} missing` })) };
   }
-  const rows = parseManifest(readFileSync(path, "utf8"));
+  const { rows, problems } = readManifest(readFileSync(path, "utf8"));
+  // A manifest the gate could not read whole is not a manifest that passed. Reporting the
+  // structural fault here is what stops a duplicated section or a fenced table from producing a
+  // confident "N rule(s) accounted for" over rows nobody read.
+  for (const p of problems) violations.push({ rule: "(manifest)", problem: p });
   // Form-lint (ADR-0003): well-formedness before the semantic check. Skip template placeholder tokens.
   const known = new Set(allRules(missionDir));
   const counts = new Map<string, number>();
@@ -231,9 +385,11 @@ export function conformance(missionDir: string, phaseId: string, deliverable: st
     if (/^\[.*\]$/.test(r.rule)) continue;
     counts.set(r.rule, (counts.get(r.rule) ?? 0) + 1);
   }
+  // ADR-0057: built-in renames plus the org corpus's own migrations.json (in-tree, no fetch).
+  const migrations = ruleMigrations(rulesDir(missionDir));
   for (const [rule, n] of counts) {
     if (!known.has(rule)) {
-      const m = RULE_MIGRATIONS[rule];
+      const m = migrations[rule];
       const hint = m
         ? (m.to ? ` — renamed to '${m.to}' in ${m.since} (${m.reason})` : ` — removed in ${m.since} (${m.reason})`)
         : " (typo? not in runward/rules/)";
@@ -244,7 +400,20 @@ export function conformance(missionDir: string, phaseId: string, deliverable: st
   const byRule = new Map(rows.map((r) => [r.rule, r]));
   for (const rule of expected) {
     const row = byRule.get(rule);
-    if (!row) { violations.push({ rule, problem: "not accounted for in the Rule conformance manifest — add a row: applied with a file:line/test, deviated with an ADR, or n/a with a reason" }); continue; }
+    // ADR-0051 paper cut: the message described the destination and not the road. `runward manifest
+    // --sync` scaffolds exactly these rows, and an operator who does not know that adds them by
+    // hand, one at a time. Naming the gesture is free; what is NOT free is implying it closes the
+    // gap — sync writes the row with an EMPTY status and the gate refuses that until a human
+    // decides (ADR-0023). So the sentence names the tool and then hands the decision straight back.
+    if (!row) { violations.push({ rule, problem: "not accounted for in the Rule conformance manifest — `runward manifest --sync` scaffolds the missing row(s), with an empty status the gate still refuses; the decision stays yours: applied with a file:line/test, deviated with an ADR, or n/a with a reason" }); continue; }
+    // ADR-0066: a proposal NEVER crosses. The refusal is dedicated, not an anonymous invalid
+    // status: a proposed row is a named, refused, counted state — the whole mechanism rests on
+    // the gate seeing it and saying exactly what it is waiting for.
+    if (proposedStatus(row.status)) {
+      violations.push({ rule, kind: "proposed", problem:
+        `${row.status} awaits ratification — a proposal is not a decision: \`runward ratify\` shows you its evidence, or decide the row yourself` });
+      continue;
+    }
     if (!VALID_STATUS.has(row.status)) {
       violations.push({ rule, problem: row.status === ""
         ? "status not set — a scaffolded row is not a decision: choose applied | deviated | n/a and fill the Evidence column"
@@ -252,8 +421,65 @@ export function conformance(missionDir: string, phaseId: string, deliverable: st
       continue;
     }
     if (row.status === "applied" && !row.evidence) violations.push({ rule, problem: "applied without an evidence pointer — put a file:line or a test in the Evidence column" });
-    if (row.status === "deviated" && !adrExists(missionDir, row.evidence)) violations.push({ rule, problem: "deviated but no matching ADR in runward/adr/ — reference an ADR that exists there" });
+    if (row.status === "deviated") {
+      const why = adrProblem(missionDir, row.evidence);
+      if (why) violations.push({ rule, problem: `deviated — ${why}` });
+    }
     if (row.status === "n/a" && trivialReason(row.evidence)) violations.push({ rule, problem: "n/a with an empty or placeholder reason — give a real one-line reason why it does not apply here" });
   }
   return { expected, violations };
 }
+
+// ── The ratification ledger (ADR-0066) ──────────────────────────────────────────────────────────
+
+/** One entry of a deliverable's `### Ratification` block — the machine-readable line grammar the
+ *  block carries, like the manifest table itself. Everything here is DECLARED, never proved
+ *  (the `sealedAt` doctrine: runward holds no key, ADR-0021). */
+export interface RatificationEntry { date: string; rows: string[]; mode: string }
+
+/** Read a deliverable's `### Ratification` block. Append-only by convention; the table says the
+ *  STATE, the block says the HISTORY. No side file — ADR-0038's precedent: the deliverable is the
+ *  state, and a ledger beside it would drift. */
+export function readRatification(content: string): RatificationEntry[] {
+  const idx = content.search(/^### Ratification$/m);
+  if (idx === -1) return [];
+  const entries: RatificationEntry[] = [];
+  for (const line of content.slice(idx).split("\n").slice(1)) {
+    if (/^#{1,6}\s/.test(line)) break; // any heading ends the block
+    const m = line.match(/^- (\d{4}-\d{2}-\d{2}) · rows: ([^·]+) · (.+)$/);
+    if (!m) continue;
+    const mode = (m[3].match(/mode: (.+)$/) ?? [, ""])[1]!.trim();
+    const rows = m[2].replace(/\((\d+)\)\s*$/, "").split(",").map((r) => r.trim()).filter(Boolean);
+    entries.push({ date: m[1], rows, mode });
+  }
+  return entries;
+}
+
+/** The mission's ratification posture, disclosed and never gating (ADR-0060's shape): how many
+ *  rows were ratified and how, and how many DECIDED rows carry no ratification trace at all.
+ *  `untraced` is the disclosure counter ADR-0066 names: an operator who decided their own rows by
+ *  hand is the legitimate solo path and pays nothing; an agent-built mission should show zero,
+ *  and the armed tier (ADR-0065) may make it blocking for missions that opt in. */
+export function ratificationLedger(missionDir: string): {
+  rows: number; lineByLine: number; enBloc: number; blind: number; untraced: number;
+} {
+  let rows = 0, lineByLine = 0, enBloc = 0, blind = 0, untraced = 0;
+  for (const g of GATED_DELIVERABLES) {
+    const path = join(missionDir, g.deliverable);
+    if (!existsSync(path)) continue;
+    const content = readFileSync(path, "utf8");
+    const traced = new Set<string>();
+    for (const e of readRatification(content)) {
+      for (const r of e.rows) traced.add(r);
+      rows += e.rows.length;
+      if (/blind/i.test(e.mode)) blind += e.rows.length;
+      else if (/^en bloc/i.test(e.mode)) enBloc += e.rows.length;
+      else lineByLine += e.rows.length;
+    }
+    for (const row of parseManifest(content)) {
+      if (VALID_STATUS.has(row.status) && !traced.has(row.rule)) untraced++;
+    }
+  }
+  return { rows, lineByLine, enBloc, blind, untraced };
+}
+

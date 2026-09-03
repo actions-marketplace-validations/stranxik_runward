@@ -1,6 +1,932 @@
 # Changelog
 
+## Unreleased
+
+### The wire contract moves to v2 (ADR-0065)
+
+`runward wire --json` publishes `schemaVersion: 2`: the `wires` field moves from the literal
+`false` ("this command never writes") to the policy string `"explicit-install-only"` — detection
+still writes nothing, and the new `wire --install` is the one writing gesture: TTY-only, refused
+under any agent runtime signal (no flag lifts the lock), file shown in full before a y/N that
+defaults to N, atomic write with a read-back probe and announced rollback, every gesture journaled
+in `runward/adapters/installed.log`. `wire --uninstall` is the symmetric removal under the same
+locks. Consumers reading v1's `wires: false` as a boolean should read the string as "still not
+without you".
+
+## 0.37.1
+
+### A machine surface that reordered itself
+
+`check --json` published `corpus.missing` in the order the filesystem returned, not in name order:
+`corpusDivergence` sorted its mission-side listing and not its package-side one. A directory reader
+walks UTF-8 bytes while `Array#sort` compares UTF-16 code units, and the two disagree above the BMP —
+measured on a package holding `\u{1F600}-rule.md` and `\uFFFD-rule.md`, where the reader returned
+the second first and the published list followed it. Below the BMP the two orders coincide on APFS
+and diverge on ext4, so the same tree published a different document depending on which runner read
+it. No verdict, exit code or set membership moves; what moved was a document nobody could compare
+across runs, in a project that holds every other emission to determinism. Filed RWD-2026-0091 and
+guarded by a fixture whose two rule names separate the two orderings.
+
+`OptionFault` also loses its `flags` field. It named the refused flag combination a second time in a
+shorter form, and nothing ever read it — the call site prints `message` and exits 2. The mutation
+campaign is what said so out loud: three of this module's four surviving mutants sat on those three
+strings, each filed `equivalent`, and they were equivalent for the reason that matters — no test
+could distinguish them because no code path could. The three misuse paths still exit 2 with their
+sentence, which already names the flags in prose.
+
+### What backs a claim, and how you can tell
+
+Nothing user-facing changed here, but the trust artifacts published with this release say more about
+themselves than they did.
+
+The **mutation survivor register** now discloses, per module, which whole net its filings were
+measured against. A row filed `hole` asserts that nothing catches the mutant — in the unit suite AND
+in the whole net of seven legs — and that second half is a claim about a set of files. Extending one
+leg makes every such claim a statement about a net that no longer exists, silently, because nothing
+recorded which net a filing had been measured against. The net now has an identity and a pass
+records it; the register prints it and says plainly when it has moved. Disclosed, not refused
+(ADR-0060) — and the first thing it discloses is that fourteen of fifteen modules have never had
+that second pass run at all.
+
+**ADR-0063** is ratified on a measurement rather than an argument: a SARIF finding whose whole
+content is that an artifact is ABSENT anchors to the path it names. Uploaded to GitHub code scanning
+on a throwaway ref, such a result comes back CREATED and `open`, with the same fields as one whose
+path exists, and the upload is accepted with no error and no warning. What a reader loses is the
+rendered snippet, not the alert — a smaller cost than moving the annotation onto a file that is
+correct.
+
+### The measurement behind the two fixes
+
+Both defects were found by instructing mutation survivors, which reached the whole perimeter for the
+first time in this cycle: sixteen modules, every survivor carrying a verdict argued from a
+measurement. The register stands at 854 survivors across fifteen modules — the sixteenth carries
+none, because a net built from its own campaign killed all seventeen of them.
+
+
+## 0.37.0
+
+### Every defect says what found it
+
+Each of the register's entries now carries a `found-by` field from a closed vocabulary, guarded by
+test and back-filled from headings and first-hand knowledge; two entries say `not-recorded` because
+nobody wrote it down and guessing would be the fabrication the register exists to refuse. Read
+across all 87 the mix is 59 adversarial-audit, 14 mutation-instruction, 4 while-reproducing,
+3 declared, 2 existing-guard, 2 not-recorded, 1 ci-os-leg, 1 conformance-corpus, 1 measurement —
+and the derivation, with three worked examples and the answer to "we already do code review", is
+[what-found-them.md](docs/compliance/what-found-them.md). The header mix is recomputed from the
+rows, never edited by hand.
+
+The author now submits to the constraint the tool sells: the repository's own Stop hook runs
+`node dist/cli.js check --strict` from the tree's build, and the only bypass appends to a
+committed log.
+
+### `compliance` instructed: 300 verdicts, re-measured to 289
+
+The module entered the mutation perimeter with 300 surviving mutants and a ratchet that REFUSED
+("never instructed"). A seven-agent fleet filed every one — each hole with a mission recipe that
+was RUN, each equivalence with a sensitivity control, zero contention — and the whole net replayed
+all 300: seven died against a leg (six smoke, one audit-corpus), six of which the instruction had
+already filed defence-in-depth with the right leg named. One verdict was reclassed, which is the
+argument for running the net rather than reasoning about it (ADR-0046 decision 3).
+
+What the concentration taught: the module's only byte-for-byte guard renders `eu-ai-act`, pins the
+OSCAL JSON and never the markdown, on a fresh mission whose gate is red — so nothing walked
+`clean`, `implemented`, the prose depth, or a single byte of the three readiness drafts. The
+instruction found the one-mutant reintroductions of RWD-2026-0058 (prose `implemented`) and
+RWD-2026-0061 (two vocabularies for one fact) before any of them could ship.
+
+After the fixes below changed three source lines, the tree was re-measured (8 CI chunks), the
+predicted MISMATCH read exactly 1 new survivor and 12 orphan keys — three of them filed holes
+retired by the new guards themselves — and the register is fresh again: 289 survivors, every one
+filed, 557 across both modules.
+
+### Fixed — two shipped defects the instruction surfaced
+
+- **A Windows checkout reported zero agentic-risk coverage** (RWD-2026-0083). `compliance.ts` kept
+  the pre-RWD-2026-0016 frontmatter delimiter while `rules.ts` and `conformance.ts` were fixed, and
+  the constant is named `FRONTMATTER` in all three. Measured on a CRLF-rewritten corpus: `runward
+  rules --json` reads 10/10 ASI categories, the pack writes 0/10 — same tree, same pass, exit 0.
+  Invisible here because this repository's own `.gitattributes` pins every checkout to LF: the fix
+  that made the project's measurements honest is what hid the defect from them. The guard compiles
+  and runs every `FRONTMATTER` delimiter found in `src/lib` against a CRLF document, so a copy of
+  the old pattern under a new name still fails.
+- **One ADR status line, four readers, four spellings** (RWD-2026-0084). On `**Status** : accepted`
+  — the space French typography requires — the pack printed `accepted` while the same run counted
+  the decision not ratified, the ADR-0033 reopening watch skipped it, and a draft rejected with
+  that spelling would have been resurrected against ADR-0038. All four readers now go through one
+  exported `adrStatusLine` in `mission.ts`, and a recurrence guard asserts no other module in
+  `src/lib` spells the pattern at all.
+
+### The trust apparatus records its own defects
+
+Three defects in the measurement layer itself, found the day the second module landed, filed per
+the RWD-2026-0060 precedent (RWD-2026-0085..0087): the register generator hard-coded
+`## Module: evidence` and filed 300 compliance survivors under the wrong module — the module is now
+read off each verdict's stable key, one section per module; the key-shape guard split on the wrong
+separator character, compared 1 to 1 and could not fail — pointed at the real `SEP` it failed at
+once, for the second reason that its statement was also wrong; and the register test's heading
+regex could not parse `(top level)`, so top-level rows were appended to the previous function.
+None of the three ever put a false byte in a committed artifact, and the register now says so
+with the same evidence discipline it applies to the product.
+
+### The runtime answer, stated as product
+
+`docs/positioning.md` gains the sibling of its release-stage section: runward's runtime product is
+**a verification contract, not a process** — the attestation at delivery (ADR-0055 layers 1–5),
+any policy engine verifying it at admission (the Kyverno reference, layer 6), the operator-wired
+harness hooks in session (ADR-0039) — and the five ADR-0054 boundary crossings stated as a
+buyer-facing guarantee rather than a roadmap gap. Nothing new is decided; the page that has the
+charge assembles three ratified decisions into one answer.
+
+### The register describes the tree again — and the instruction found three more things
+
+The 2026-08-26 fixes added 148 lines to `evidence.ts`, and the CI ratchet came back MISMATCH with
+**75 survivors the register did not carry**. A three-agent fleet instructed all of them in isolated
+worktrees: **32 holes, 35 equivalents, 7 defence-in-depth, 1 display-only**, each hole carrying a
+mission recipe that was RUN, each equivalence carrying a sensitivity control. The register is
+regenerated at 268 survivors across 22 functions (164 hole, 69 equivalent, 26 display-only,
+9 defence-in-depth) and the ratchet is green.
+
+The brief carried a new rule, and it held: these survivors were measured on an idle CI runner, so a
+local "killed" contradicting that is CONTENTION, not a finding. No agent reported one.
+
+Three things the instruction found that the classification was not looking for:
+
+- **RWD-2026-0082** — an ESCAPED parenthesis (`sand\(box`) was refused as a catastrophic group by
+  yesterday's own fix. A false red on correct work, quiet because a balanced pair happens to reduce.
+- **The two nets added this week were in NEITHER pass of the mutation harness**, so every mutant they
+  catch was reported as surviving. `test/spelling-conformance.js` and `test/sarif-shape.js` join the
+  whole net.
+- **runward had no macOS leg**, so the two Unicode-folding cases of the ADR-0061 corpus — the ones
+  covering RWD-2026-0031 and RWD-2026-0035 — were skipped on every runner the project used. ext4 is
+  case-sensitive and NTFS does not fold the sharp s. A `macos-latest` leg now runs the corpus and the
+  self-gate. The corpus surfaced this by NAMING its skips, which is what it was built to do.
+
+And one worth recording without an entry: **RWD-2026-0070, the symlink seal, shipped with no test of
+its own** — which is why eleven of its mutants survive, and why an agent could name the gap in a
+sentence.
+
+### The SARIF is held to the official schema (ADR-0062)
+
+`test/fixtures/sarif_schema.v2.1.0.json` — the OASIS SARIF 2.1.0 schema, vendored offline with its
+provenance and sha256 like the OSCAL and in-toto ones — now validates all four mission states.
+
+It needed `ajv-draft-04` (the schema is draft-04; ajv 8 dropped it), which was left as an operator
+decision on 2026-08-26 rather than taken silently. Taken now, and the reason is checkable: the
+package comes from the same `ajv-validator` organisation as `ajv` and `ajv-formats`, **both already
+dev dependencies here**, is dev-only, and was verified to DETECT before being adopted — a wrong
+`version`, a missing `runs` and a `level` outside the enumeration are each refused. The structural
+checks stay: a schema cannot say that a uri resolves in the checkout, and every uri of
+RWD-2026-0041 was schema-valid.
+
+### The spelling brick gets a specification (ADR-0061)
+
+`test/fixtures/spelling-corpus.json` + `test/spelling-conformance.js`: twelve cases, each a triple of
+pointer-as-written / layout-on-disk / expected verdict, each citing the defect it was learned from
+(fourteen of them belong to this one brick). The harness probes the host filesystem, runs what
+applies, and **names what it skipped and why** — ADR-0046's amendment was paid for by a measurement
+that was a property of code AND filesystem while claiming to be a property of code.
+
+The harness itself failed its first `windows-latest` run — a dynamic `import()` of a bare `C:\...`
+path is read as the URL scheme `c:` — which is the right place for a corpus that claims to be the
+portable artifact to be corrected.
+
+- **RWD-2026-0081** — found on the corpus's FIRST run: the walk bound added the previous day was
+  passed in the canonical namespace while the walked path is logical, so on macOS (`/var` →
+  `/private/var`) it never engaged and the false red it closed was alive again. The verification that
+  had accepted that fix used a path where the two namespaces coincide, so it could not have shown it.
+
+### A vacuous green is disclosed, not refused (ADR-0060)
+
+- **RWD-2026-0079** — a mission with no code returned exit 0, `clean`, and `100%` coverage while the
+  honest example reads 87%. It stays green (ADR-0054 makes this a documentary gate) and the run now
+  SAYS it: `evidenceFiles: {total, external}` is counted, disclosed in the pass, and carried in the
+  ADR-0030 contract. The precedent followed is ISA 705's disclaimer of opinion, not pytest's exit 5.
+- **RWD-2026-0080** — `verify` compared predicates through `JSON.stringify`, making key order
+  load-bearing: an honest attestation with identical contents reported `differing: ["evidence"]`.
+  Object keys are canonicalised now; arrays keep their order, where order is meaning.
+
+### The boundary's own paperwork (2026-08-26 audit, tier 5)
+
+- **RWD-2026-0075** — "same working tree, same verdict" omitted the installed runward version, which
+  is a real second input by design. Measured: one rule added to the installed corpus flips an
+  untouched mission from exit 0 to exit 1. Four documents now say the tree AND the version.
+- **RWD-2026-0076** — two of ADR-0054's five crossings had no test, and one test proved crossing 5
+  under crossing 3's name. Both gaps are closed, each guard with its own positive control.
+- **RWD-2026-0077** — the boundary test called `--hooks` "outside computeVerdict"; `hookFailed` is an
+  argument to it. The real mitigations are written down instead of implied, along with the closure's
+  package-boundary limit.
+- **RWD-2026-0078** — `--corpus @acme/rules@1.2.3` fell to a generic "path not found" because the
+  guard's shape stopped at the second `@`, so the sentence explaining the boundary reached only
+  someone who had already dropped the version.
+
+### The runtime boundary, and the instrument that guarded it (2026-08-26 audit, tier 5)
+
+- **RWD-2026-0073** — the ADR-0054 boundary test was blind on the path that owns the exit code. Four
+  of five planted mutations left all four tests green, including a dynamic import — verbatim the
+  reevaluation trigger ADR-0054 wrote for itself, already met when it was written. The boundary did
+  not move; the instrument now walks a second, wider ring from `check.js` with exactly one
+  enumerated crossing allowed. ADR-0054 carries the amendment and the measurement table.
+- **RWD-2026-0074** — `chmod 0111` on the project's PARENT turned an unchanged tree from exit 0 into
+  exit 1 with 21 pointers refused, each pointing the operator at a path outside their project. The
+  case walk is now bounded to the project root.
+
+Two more findings from the same report were **closed as side effects** of the morning's containment
+work and verified: an empty `.git` above the project no longer greens out-of-tree evidence, and the
+in-toto mission digest no longer changes when a file outside the project does.
+
+### The machine surfaces (2026-08-26 audit, tier 5)
+
+- **RWD-2026-0067** — `--json --sarif` emitted one document and silently dropped the other, by an
+  undocumented precedence chain. Combined emission flags are now refused; a document-typed request
+  with no mission writes nothing to stdout instead of a JSON that is not the document asked for.
+- **RWD-2026-0068** — `--freeze --json` reported `seal: present false` on the pass that sealed.
+- **RWD-2026-0069** — `SOURCE_DATE_EPOCH` reached only the VSA. It now reaches every clock runward
+  writes; `interop.md` named the wrong set and the wrong variable, and now names both correctly.
+- **RWD-2026-0070** — a cited symlink put its target in the seal and never itself, so re-pointing
+  the link left `✓ seal intact` at exit 0. Link and target are both sealed now.
+- **RWD-2026-0071** — `runward bundle ../outside.txt` bound a file outside the project into a
+  document about that project. ADR-0019's containment now holds one envelope out.
+- **RWD-2026-0072** — nothing checked the emitted SARIF. `test/sarif-shape.js` runs four mission
+  states through every structural invariant a consumer relies on. It is **not** OASIS-schema
+  validation and says so: that needs `ajv-draft-04`, a dependency decision left to the operator.
+
+Two findings from the same report were **closed as side effects** and verified: `--through` +
+`--sarif` no longer annotates deferred deliverables with an error level, and an empty `.git`
+directory above the project no longer greens out-of-tree evidence (it now refuses with
+*"resolves outside the project this mission audits"*).
+
+### The caveat reaches the envelopes that leave the building (2026-08-26 audit, tier 4)
+
+- **RWD-2026-0065** — the SLSA VSA and the bundle predicate were the only two emission surfaces
+  without `GATE_NON_SCOPE`, and they are the two a policy engine ingests with no human in the loop.
+  The VSA carries it in `policy.annotations`, inside the spec shape.
+- **RWD-2026-0066** — the OSCAL mapping spec offered three implementation states, one of which
+  cannot occur on a mission using the shipped corpus: all ten ASI categories are mapped, so
+  `planned` never fires. The spec says so, and names when it would.
+
+### The run says what actually failed (2026-08-26 audit, tier 4)
+
+- **RWD-2026-0063** — a broken seal printed `1 floor rule-conformance gap(s)` and `Fill the
+  deliverable(s) named above`, with none named and every one filled. The verdict now carries
+  `strictBreakdown`; the summary names the class and the `Next` gesture matches it.
+- **RWD-2026-0064** — the corpus-drift remedy prescribed `runward update` for all three cases.
+  Measured: it clears *missing*, is a no-op for *edited* (only `--force` works), and clears
+  *extra* not at all. Each line now carries the gesture measured to clear it.
+
+### Two surfaces that disagreed with themselves (2026-08-26 audit, tier 4)
+
+- **RWD-2026-0061** — `compliance` called a governance file *present* in the same pass where `check`
+  called it a *raw template*. One used `existsSync`, the other `artifactState`. Same function now,
+  and the same words.
+- **RWD-2026-0062** — the README said *six phases, gated*; five are gated. Phase 4 carries no gate
+  by decision (ADR-0033), and the README now carries the reason.
+
+### The documents catch up with the code (2026-08-26 audit, tier 4)
+
+- **RWD-2026-0058** — the OSCAL pack called a control `implemented` when its only evidence was a
+  sentence, and the readiness document never used the word *prose*. Now `partial`, with a
+  `runward-evidence-depth` prop naming which rules rest on a sentence.
+- **RWD-2026-0059** — README and runward's own port contract claimed it *runs nothing of yours*, in
+  a build where `check --hooks` runs your shell commands outside the audited repository. The code was
+  precise the whole time; only the prose overstated. Guarded from the code, not from a list.
+- **RWD-2026-0060** — the defect register had two duplicate identifiers and a header twelve days and
+  three releases stale. Renumbered by first-assignment, with a redirect note, and guarded.
+
+### `spec-check` reads the spec people write (2026-08-26 audit, tier 3)
+
+- **RWD-2026-0054** — `spec-check` said *every criterion is linked* on six ordinary shapes: two
+  acceptance sections, a `###` sub-heading inside one, criteria as a table, criteria as prose, an
+  empty section, and a decoy heading above the real one. The pointer layer was repaired; the section
+  walk was not, while the manifest parser beside it documents these exact shapes as fixed bugs.
+- **RWD-2026-0055** — a pointer inside backticks, the way markdown is written, was refused with
+  *symbol "login`" not found*. `clean()` now strips a trailing backtick.
+
+### `test:` now means a test (2026-08-26 audit, tier 2)
+
+- **RWD-2026-0053** — a prose deliverable declared as `test:…::of` returned exit 0 on an unsigned
+  rule. A document is not a test. Checked on the extension only, because a name convention would
+  refuse Rust `#[cfg(test)]` and Go table tests that live in source files.
+
+Two low findings from the same audit closed as a side effect and verified: the coverage counter no
+longer reaches 100% on self-citing `#of` pointers (it now reads 0 typed / 23 prose on that mission),
+because the counter consults the same circularity rule the verdict does.
+
+### Four missing nets (2026-08-26 audit, tier 2)
+
+Detectors that could not see the one shape where the abuse is free. Each reproduced first, each
+fixed with the opposite direction asserted, and each new test measured RED against the unfixed build.
+
+- **RWD-2026-0049** — the seal covered no `adr:` target: 0 of 18 lock keys under `adr/`, so every
+  ADR body could be replaced with filler under `✓ seal intact`.
+- **RWD-2026-0050** — the duplicate-cell census read `applied` rows only, skipping the two columns
+  where copying a cell costs nothing. `duplicated[].rules[]` now carries `status` (additive).
+- **RWD-2026-0051** — the ReDoS screen accepted anything past 21 nesting levels, and was blind to
+  `a*a*`: eight adjacent repetitions of one atom exceed 20 s on a 40-character subject. An exhausted
+  screen now refuses instead of approving.
+- **RWD-2026-0052** — the `n/a` reason floor counted keystrokes, so `xxxxxxxx` cleared it. Now a
+  degeneracy floor, and **recorded as a limitation rather than closed**: the gate does not read prose.
+
+### The gate's own false greens (2026-08-26 audit, tier 2)
+
+Three ways a green line rested on nothing, all reproduced on the shipped 0.36.2 binary and on this
+tree before being closed, each with a sensitivity control proving the fix is not a blanket refusal.
+
+- **RWD-2026-0046** — circularity was tested on the pointer, not the target: dropping `file:` moved
+  the rule's own file into a loop that banked it unexamined. Four states of one cell on a CRITICAL
+  signed rule: prose → 1, unrelated file → 1, typed self-pointer → 1, **bare self-path → 0**.
+- **RWD-2026-0047** — the signature was tested against the whole file, table included, so the row
+  declaring a rule satisfied it. 7 of the 9 signed rules ship a signature their own slug matches,
+  three CRITICAL. The signature now reads the text outside the manifest.
+- **RWD-2026-0048** — `isRealAdr` was a filename test, so a zero-byte ADR read `✓ Decision journal`,
+  `all gates passed`, `1 decision(s) traced` and `1 ratified ADR(s)`. Three definitions of "an ADR"
+  existed across three layers; they now share one predicate and one threshold, and the compliance
+  pack counts as *ratified* only what carries a ratified status.
+
+`test/audit-corpus.js` gains the bare-path vector and reads 15/15 — it read 14/14 while that hole was
+live, because it carried only the `file:` spelling of the same attack. A second candidate vector was
+written and then REMOVED rather than shipped: it was refused by the unfixed build for an unrelated
+reason, so it would have printed `ok` without testing what it names. Its proven detector is
+`test/unit/gate-false-greens.test.js`, measured red on the unfixed build and green on the fixed one.
+
+**The version string is part of the fix, not bookkeeping.** `runward verify` derives version skew from
+`predicate.runward !== VERSION`, and this tree carries fifteen false-green fixes over the published
+0.36.2 while stamping the same string — so no skew could ever be named between a build that has the
+defects and one that fixes them, and a compliance pack stamped `0.36.2` may have been produced by
+either. That was itself an audit finding.
+
+### Fixed — the adoption path (`update --corpus`)
+- **RWD-2026-0038** — vendoring an org corpus erased the lock record of every rule runward wrote,
+  turning a green mission red on 31 rules it had scaffolded seconds earlier while reporting success.
+- **RWD-2026-0039** — replacing a shipped rule from an org corpus was labelled with the word runward
+  uses for its own refreshes, so a fork with one `signature:` line deleted flipped a red gate green
+  in silence. It is now named `replaced` and counted as a warning.
+
+### Fixed — the artifacts the gate hands to a machine
+- **RWD-2026-0040** — a red gate emitted a SARIF byte-identical to a green one whenever the gap was
+  the evidence seal, the rule corpus, an unratified decision or a failed hook.
+- **RWD-2026-0041** — half of every SARIF used a mission-relative uri, so those annotations pointed
+  at paths no checkout holds.
+- **RWD-2026-0042** — `runward verify` re-derived two predicate fields of fifteen; everything a
+  regulator would read was unbound free text.
+- **RWD-2026-0043** — `verify` took its strictness from the untrusted predicate and never reported
+  which gate it had re-derived.
+- **RWD-2026-0044** — `--vsa` named `RUNWARD_GATE_STRICT` on a `FAILED` verification, in the one
+  field the interop page tells a policy engine to branch on.
+- **RWD-2026-0045** — the OSCAL pack was byte-identical between a green gate and one red on eighteen
+  unresolvable pointers, and declared controls `implemented` from the manifest status column alone.
+
+### Still open, recorded rather than fixed
+The third adversarial audit produced 56 measured findings across five dimensions. Nine of the fifteen
+high-severity ones are fixed here; the remainder are filed in
+[known-defects.md](docs/compliance/known-defects.md) with their reproductions, and are not closed.
+
+## 0.36.2
+
+**Two more false greens in the spelling ladder, both live since 0.32.0 and 0.34.0 — and neither reachable by reading the code. One needed a permission state nobody creates by accident; the other needed a filesystem the author does not have.**
+
+### The false greens
+
+- **A directory the gate could not list silently cleared the case check** (RWD-2026-0029). `onDiskSpelling` returns `null` for *"the spelling already matches"*, and its `catch` returned `null` too — so *"I could not check"* and *"it is fine"* were the same answer. Measured: `file:./src/Guard.TS` citing a file spelled `guard.ts` is refused with the directory at `0755` and **passes at `0111`**, on a filesystem where it resolves only because the filesystem is forgiving. One permission bit cleared the check for everything beneath it. An unverifiable spelling is now its own answer and a named violation — where the gate cannot verify, it says so in the run ([ADR-0045](docs/adr/ADR-0045-the-gate-cannot-be-satisfied-by-paperwork.md)).
+- **On Windows, a redundant `./` defeated the check entirely** (RWD-2026-0030). There `onDiskSpelling` is already defeated by 8.3 short names (`RUNNER~1` against the long name the parent directory lists), which is why `spellingViaRealpath` exists — so it is the **only rung left**, and its failure is the whole ladder's. It compared the operator's raw cell against a canonical suffix: `.\src\Guard.TS` versus `src\guard.ts`. The comparison failed on the *prefix* rather than on the *case*, and "no difference" is what a caller reads as "correctly spelled". Measured on the windows-latest leg: `file:src/Guard.TS` refused, the same pointer written `file:./src/Guard.TS` accepted, same tree. macOS caught both forms all along, which is precisely why nothing before that leg could see it.
+
+Both are a green on the author's machine that turns red on a case-sensitive runner — the surprise that makes people stop trusting a gate.
+
+### The tool-adapter routing is guarded
+
+`tool-adapters.test.js` proved each committed-tool adapter answers correctly **when called**. Nothing proved the gate *calls* it, or *acts* on the answer: 27 mutants sat on that routing and survived the unit suite and the whole net. They **move** a verdict rather than remove it — a coverage report routed to the lint branch still produces a violation, just the wrong one, and a test that only checks "something was raised" passes.
+
+A matrix now covers 4 adapters × every state they can return, each asserting the failure **class** and never the wording, each with the mirror state that must stay silent. Plus the structural cases: the same SARIF body under three filenames routes identically ([ADR-0056](docs/adr/ADR-0056-committed-tool-artifacts-as-evidence.md) recognises shape, never extension), and an ordinary source file still reaches the symbol check. **Measured after: 73 mutants in that range, 73 killed.**
+
+### Also
+
+- The mutation instrument's concurrency is set from a measurement rather than from the core count: the unit suite uses **310 % CPU**, so each worker costs ~3 cores and the ceiling on 8 cores is two. Getting this wrong always errs toward flattery, because a starved run is filed as a caught mutant.
+- Tests that depend on filesystem behaviour now **probe** the capability — case-insensitivity, and whether this process can be denied a directory listing — instead of inferring it from `process.platform`. A case-sensitive volume on macOS and a root container on Linux both exist.
+
+## 0.36.1
+
+**Three false greens in the evidence layer, found by instructing the mutants that survive runward's own test net — and the instrument that found them, which was measuring the machine instead of the code.**
+
+### The false greens
+
+None of these needed a mutant to reach. They were exposed by building a mission that would actually exercise each function, which is what instructing a survivor requires ([ADR-0046](docs/adr/ADR-0046-mutation-testing-is-an-instrument-not-a-gate.md) decision 3).
+
+- **A code fence hid the manifest from the circular-evidence check** (RWD-2026-0025). `textOutsideManifest` removes the conformance table before looking for a self-cited symbol, because column 1 of every row is the rule's own slug and would always match. It took the **first** matching heading, fenced or not, so an example of the format pasted above the real table left the real table inside the text being searched. That is RWD-2026-0002, the universal green key, reopened by a code fence — and `readManifest` had already fixed this exact shape for row parsing. Measured: the same self-citing row exits **1** without the illustration and **0** with it.
+- **One invisible character swallowed a typed pointer** (RWD-2026-0026). The pointer pattern ends in `$`, and `.` never matches a line terminator in JavaScript, so a single CR, U+2028 or U+2029 after the prefix made `$` unreachable: the pointer was dropped **in silence**, the row still read as typed, and the cited file was never opened. A paste leaves such characters behind and nobody can see them. Measured on a row citing a file that does not exist: exit **1** with an ordinary cell, exit **0** with a U+2028 in it. Terminators are now folded to a space before parsing, which cannot change a well-formed cell since a space is already a pointer separator.
+- **An absent seal said nothing at all** (RWD-2026-0027). The output could not distinguish "never sealed" from "seal deleted": tamper with a sealed evidence file and the gate exits 1, delete `runward/evidence-lock.json` and the same tampered tree exits 0, silently. The strict run now names the regime it is in. The **verdict** is deliberately unchanged, and RWD-2026-0028 records why in a new `known-defects.md` section for constraints that cannot be closed inside the repository: sealing is opt-in, and an in-repository marker declaring "this mission seals" buys nothing against anyone deliberate while costing honest teams a red gate — the reasoning `scaffold-lock.ts` already carries about the corpus lock.
+
+### The instrument, and why its own numbers had to be thrown away
+
+- **The mutation harness is committed** — configuration, resumable passes, the probe, and a survivor register generated from measured verdicts. The ratchet of ADR-0046 decision 2 had existed since 2026-08-05 with **no list to be diffed against**, so "the survivor list does not grow" could not be falsified. That is the shape ADR-0045 refuses from an operator.
+- **The raw numbers were fiction.** The harness bounded children with `spawnSync`'s timeout, which signals the direct child only, while `node --test` isolates each test file in its own process — every expired run left about a dozen grandchildren alive, still executing their mutant. Measured: load average **78 on 8 cores**, 32 orphans surviving the driver, and at one point two copies of the verifier racing each other. Stryker counts a `Timeout` as *detected*, so starved survivors vanished into the detected column and the score went **up**: the same module read **98.1 %** contaminated and **77.4 %** clean, with 199 of 269 "timeouts" turning out to be survivors.
+- **The instrument now refuses to measure what it cannot measure**: process groups killed whole, hangs reported rather than inferred from an exit code, a lock against a second concurrent copy, the mutant read back from disk before any verdict is taken, and a mutant list bound to the sha256 of the build it was measured on — three fixes moved one function by 47 lines, and a replay would otherwise have spliced into other code with full confidence.
+- **[`docs/compliance/mutation-register.md`](docs/compliance/mutation-register.md)** files all 215 survivors of `evidence` as **144 holes, 42 equivalents and 29 display-only**, each carrying what was run and observed rather than what was reasoned, every equivalence argued, guarded on every commit by a test that never runs Stryker.
+
+Nothing here changes the gate's contract: no threshold, no score is a crossing condition, and CI does not run the pass.
+
+## 0.36.0
+
+**The evidence layer reaches the artifacts a factory already produces, and the verdict leaves in the formats its consumers already read. Plus the two false greens the pre-announcement audit found in 0.35.0's own code, and the Windows leg that proved the central invariant on a third OS.**
+
+### The verdict, in formats other tools already read
+
+- **`check --sarif`** emits the gate's own findings as a SARIF 2.1.0 log, each gap annotated on the **manifest row that carries it** — a reviewer reads the verdict in the pull request instead of a CI log. Row located by its first column (never a substring, which would annotate prose above the table), repository-relative URIs, deterministic bytes, and a valid **empty** log on a green mission, which is what clears stale annotations. Emission only: runward writes the file, your CI uploads it.
+- **`check --vsa --resource-uri <uri>`** emits the verdict as a **SLSA Verification Summary Attestation** — a neutral port, so a policy engine admits on it without learning runward's vocabulary. It claims **no SLSA level**: `verifiedLevels` carries a custom value (`RUNWARD_GATE_STRICT`, `…_THROUGH_<PHASE>`), because runward verifies a delivery gate and never looked at your build pipeline. `--resource-uri` is required and never guessed. Its `timeVerified` is a clock the spec mandates, making this the one non-byte-idempotent emission — set `SOURCE_DATE_EPOCH` and it is reproducible again.
+- **`runward verify` tolerates DSSE envelopes**: it decodes the payload and re-derives, and reports the signature as present and **not verified** — runward anchors no trust root, and checking a signature it cannot anchor would be a stronger claim than the tool is entitled to. A lying predicate inside an envelope still fails.
+- **A PR-native `verify` Action** (`stranxik/runward/verify@<sha>`): emits and re-derives, writing the verdict to the job summary. Exercised on runward's own mission in CI, so it cannot rot unnoticed.
+- **`runward bundle`** and the [reference Kyverno policy](examples/kyverno/require-runward-verdict.yaml) complete the chain, with [docs/interop.md](docs/interop.md) carrying the recipes: cosign signing, Archivista/Chainloop/OCI deposit, the verdict as external evidence in Kosli and JFrog gates.
+
+### Committed-tool adapters: the evidence a factory already has
+
+A rule row (or a spec criterion) can now rest on an artifact your CI already commits. Same mechanism throughout — recognise the file **structurally**, read what the tool recorded, refuse what the tool itself marked bad:
+
+| Point at | The pointer names | Resolves when | Refused |
+|---|---|---|---|
+| a **SARIF** scan | `#ruleId` | the scan knows the rule and records no open finding | open findings; a rule never checked |
+| a **coverage** report (lcov or Cobertura) | `#path/to/file.ts` | measured **and** something exercised it | measured with zero covered lines |
+| an **ESLint** report | `#path/to/file.ts` | linted, no error-severity finding | recorded errors (a warning does not redden) |
+| a **CycloneDX SBOM** | `#pkg:npm/name@1.2.3` | the component is declared | a different version; **a bare name**, refused rather than resolved |
+
+Never a threshold, and never a semantic judgment: this is "an empty file is not evidence", declined — **a red test is not evidence, a scan with open findings is not evidence, a file nothing exercises does not prove the rule was applied in it.** SCA deliberately gets no adapter: vulnerability findings are the SARIF adapter's job.
+
+### `spec-check` takes a bundle, and the delta must hold together
+
+Point it at several files or a feature **directory** (`specs/<feature>/`, an OpenSpec change dir) and it adds a second deterministic question: every criterion identifier the bundle **references** must be **declared** by some file of it. `tasks.md` implementing AC7 when the spec declares AC1..AC5 is broken whatever AC7 meant. The identifier pattern is deliberately narrow, so RFC 7231, ISO 42001 and task T3 do not become false reds.
+
+### Two false greens, found by an audit of this project against itself
+
+The 2026-08-14 full-repo audit (thirteen agents, three of them adversarial) found both **inside the evidence layer** — the exact defect class the gate exists to refuse:
+
+1. **The JUnit adapter stopped at the first matching case.** With two homonymous cases in two suites, a **red** case behind a green one was invisible and `test:…::NAME` read "pass". Now every occurrence is scanned and one red reddens; `CLASS::NAME` pins one case among legitimate homonyms.
+2. **`spec-check` silently dropped the declared depth.** A criterion linked to an absent `#SYMBOL` or a red `::NAME` read "linked". It now verifies through the gate's own evidence layer, and a criterion links only when **every** one of its pointers verifies.
+
+### Windows, proven rather than assumed
+
+A `windows-latest` CI leg now runs the full suite plus the self-gate. Its first run found seven real defects across three root classes, all fixed: artifact paths are **POSIX by contract at emission** (a bundle made on Windows was not byte-comparable with one made on Linux), the checkout is LF everywhere (`.gitattributes`), and the case-forgiving-filesystem check was silently skipping under 8.3 short names — on the exact platform it exists for. *Same working tree ⇒ same verdict* now holds on three operating systems.
+
+### The run says more, and claims no more
+
+- **The missing-row message names the gesture** (`runward manifest --sync` scaffolds the rows) and hands the decision straight back: sync writes an empty status the gate still refuses.
+- **`in-progress` states its true cause** — placeholders left, or content below the divergence floor. `state` is unchanged; `cause` is additive in `--json` and SARIF.
+- **Identical Evidence cells are named** in the run, grouped by cell. Counted, never gated: one artifact can legitimately evidence several rules.
+- **Every CRITICAL/HIGH rule is ruled on against OWASP ASI** — mapped, or declaring in writing why it has none. Completing all nineteen unmapped rules would have reported agentic-security coverage that does not exist; a test now refuses the third state, silence.
+- **`npm run bench`** measures the gate's cost on your machine: burying the reference mission under 10,000 uncited files leaves it flat. The gate is O(cited evidence), not O(repo).
+
+### Migration
+
+Nothing renames and no flag changes meaning. Two populations turn red, both deliberately:
+
+1. **A `test:…::NAME` pointer whose report holds a red homonym.** Fix: pin yours with `test:report.xml::CLASS::NAME`, or accept that the red test was never evidence.
+2. **A spec-check criterion whose `#SYMBOL` / `::NAME` does not verify.** Fix: point at the real symbol or case, or drop the depth marker you cannot honour.
+
+Both reference missions are strict-green under this release.
+
+## 0.35.0
+
+**The verdict layer: the verdict becomes a portable, re-checkable, standards-legible object — attested, re-derivable offline, bindable into one provenance — and a full-repo audit hardened it before it shipped. Two false greens found by that audit die in this release; the migration note names who reddens and the one-line fix.**
+
+### `runward check --attest` — the verdict as an attestation ([ADR-0055](docs/adr/ADR-0055-the-verdict-is-a-standards-legible-attestation.md) layer 1)
+
+Wraps the `--json` verdict in an **unsigned** in-toto Statement v1 (predicate `https://runward.dev/verdict/v1`) whose subject digest binds it to the exact mission state (the mission tree ∪ the cited evidence files). Byte-idempotent; no signature field — signing stays your gesture, under your key, runward holds none. The envelope is schema-validated in CI against a **vendored** in-toto Statement v1 schema, with the network cut.
+
+### `runward verify` — offline re-check ([ADR-0055](docs/adr/ADR-0055-the-verdict-is-a-standards-legible-attestation.md) layer 2)
+
+Re-derives the mission-state digest and the verdict from the current tree and confirms the attestation binds to it: a drifted tree and a tampered predicate both fail, loud; no network, no trust root, no key. A **version skew is named** (`producedBy`/`versionSkew`): when the attestation was produced by an older runward, a re-derivation failure can be verdict-logic evolution rather than tampering, and verify hands over the distinguishing gesture (`npx runward@<producedBy> verify …`) instead of letting the two read the same. A phase-crossing attestation (`check --through --attest`) records its declared horizon and verifies against that prefix — a verified prefix can never be read as a finished mission ([ADR-0053](docs/adr/ADR-0053-the-construction-gate-certifies-a-declared-horizon.md)).
+
+### `runward bundle` — one provenance for an assessor ([ADR-0055](docs/adr/ADR-0055-the-verdict-is-a-standards-legible-attestation.md) layer 4)
+
+Binds already-emitted artifacts (the verdict attestation, the evidence seal, an OSCAL pack, an SBOM…) into a single in-toto manifest, each referenced by raw SHA-256 — re-verifiable by `runward verify` or any cosign/in-toto tool.
+
+### `runward spec-check` — deterministic spec conformance ([ADR-0056](docs/adr/ADR-0056-the-evidence-layer-widens.md))
+
+Every acceptance criterion in a spec (Spec Kit, OpenSpec, BMAD — format-agnostic markdown) must be **linked** to a delivered artifact that resolves, at the depth the pointer declares: `#SYMBOL` at an identifier boundary, `::NAME` recorded green in a committed JUnit report, the `:LINE` bound — through the gate's own evidence layer, never a re-implementation. A criterion links only when EVERY one of its pointers verifies: one green path cannot mask a broken `#SYMBOL` beside it. Linkage, never semantic satisfaction — `SPEC_NON_SCOPE` travels with every verdict, and the exit stays the 0/1/2 port.
+
+### Committed-tool evidence: the JUnit adapter ([ADR-0056](docs/adr/ADR-0056-the-evidence-layer-widens.md))
+
+A `test:reports/junit.xml::Name` pointer resolves against the **committed** report structurally — present-and-green, present-and-red, absent — never by running anything. **Every homonymous case is scanned and one red reddens the verdict** (the audit's first blocking finding: the first version stopped at the first match, so a red case behind a green homonym was invisible); `CLASS::NAME` pins one case among legitimate homonyms via the `classname` attribute.
+
+### The shared corpus, pinned without a registry ([ADR-0057](docs/adr/ADR-0057-the-shared-corpus-is-pinned-without-a-registry.md))
+
+An org vendors ONE rule corpus across a fleet with **no registry and no fetch**: `runward update --corpus <path>` vendors `runward/rules/` from an already-vendored local directory — a filesystem path, **never** a registry coordinate (`@org/rules` is refused by name) — and records the pin in the scaffold-lock. The corpus self-describes (`corpus.json` → `corpusPin` in `check --json`); a pin/bytes divergence is reported as `corpusDrift`, **advisory, never a gap** (both stamps are re-signable together — gating them would be ADR-0002's re-signable floor). The corpus's own `migrations.json` merges with the built-in migrations at every reading surface, so a renamed org slug is guided, not guessed at. The no-fetch invariant is proven structurally: the whole flow runs inside CI's network-cut block, where any socket attempt fails the job.
+
+### The gate, hardened and accounted for
+
+- **Three more signed rules** — `config-secrets-boundary`, `async-job-guardrails`, `data-memory-provenance` (9 of 64), each on an idiom its text prescribes, each with a `nonScope`.
+- **`rules --for --json` refuses rather than guesses**: a top-level `couldNotRead` names every territory carrier a read step could not fully read, so an orchestrator cannot treat a shortened answer as exhaustive.
+- **The runtime boundary is a test, not a promise** ([ADR-0054](docs/adr/ADR-0054-the-runtime-boundary-is-explicit.md), now accepted): the transitive import closure of the verdict path contains no socket module and no process spawner; `check --strict --json` is byte-identical across two runs; no command speaks `--changed`/base-ref. `npm run bench` answers the monorepo objection with a measurement: burying the reference mission under 10,000 uncited files leaves the gate flat — O(cited evidence), not O(repo).
+- **The journal caught up with the code**: ADR-0054 and ADR-0056 ratified on their proofs, ADR-0055 amended (the subject is the mission-state digest — stated, no longer silent; layers 3-4 recorded delivered), ADR-0005 amended (a reader of a committed report is not the runner lock-in it refused). The assessor-facing compliance registers were corrected in the uncomfortable direction: they claimed three packs did not carry `GATE_NON_SCOPE` when all four do — the claim now follows the blocking test instead of being maintained by hand.
+- **The README says what ships**: the verdict layer is documented from the front door, and the turn-end hooks are labeled what they are — advisory by design (`|| true`), the hard stop is CI.
+- **`runward/claims` resolves**: the forbidden-claim list ships as a real package export (with a wildcard passthrough so no existing deep path breaks), and the site build now consumes it as a failing guard — one list, no drift ([ADR-0050](docs/adr/ADR-0050-the-public-claim-is-narrowed-to-the-provable-form.md) executed end to end).
+
+### Migration — two false greens die, and three rules gain a signature
+
+1. **A `test:…::NAME` pointer whose report holds a red homonym.** Previously read "pass" off the first match; now one red reddens. **Fix:** if the homonyms are genuinely different tests, pin yours with `test:report.xml::CLASS::NAME`; if not, the red test was never evidence.
+2. **A spec-check criterion whose `#SYMBOL` / `::NAME` does not verify.** Previously "linked" on path presence alone; now the declared depth must hold, on every pointer of the criterion. **Fix:** point at the real symbol/case, or drop the depth marker you cannot honor.
+3. **A prose `applied` row on `config-secrets-boundary`, `async-job-guardrails` or `data-memory-provenance`.** Same class as 0.34.0's five: a signature makes shape-matching evidence mandatory. **Fix:** point at evidence carrying the idiom, or answer `n/a`/`deviated` with a reason.
+
+Both reference missions are strict-green under this release; every change was validated in both directions.
+
+## 0.34.0
+
+**Three decisions from the 2026-08-12 product review land: the construction gate becomes usable in CI, and the gate is made as strong as its headline. This release deliberately reddens some previously green missions — the migration note below names exactly which, and the one-line fix for each.**
+
+### `runward check --through <phase-id>` — the construction gate ([ADR-0053](docs/adr/ADR-0053-the-construction-gate-certifies-a-declared-horizon.md))
+
+A required `check --strict` exits 1 for the whole build, because later-phase deliverables are unfilled by definition — so it was unusable in CI during construction, and teams hacked a partial-green with `jq` or `|| true`. `--through <phase-id>` certifies a declared PREFIX: every phase up to and including `<phase-id>` is crossed on evidence, nothing past it. It narrows only the phase counters; the 0/1/2 exit contract, the seal and the six phases are untouched, and the phase-global integrity checks (corpus, seal, unratified ADRs, drift) are NOT scoped, so a regression at or below the horizon still reds — the horizon is a floor, not a ceiling. It refuses `--freeze` (a seal certifies a full crossing) and an unknown id, both exit 2; it prints a loud "not a completion verdict" banner and carries additive JSON (`through`, `horizon`, `gaps.deferred`). The wiring contract is in the ADR: the release / merge-to-main gate stays the full `check --strict`; `--through` is a construction progress signal, never the sole required release check.
+
+### The gate is made as strong as its headline ([ADR-0051](docs/adr/ADR-0051-the-gate-is-made-as-strong-as-its-headline.md))
+
+- **Symbols match at an identifier boundary.** `#guardFields` no longer matches a file that contains only `guardFieldsLegacy`. A renamed identifier — the exact "moved or renamed" case the violation message names — now reds instead of silently passing, and a seal can no longer sit on a pointer whose identifier no longer exists. Non-identifier symbols (dotted, quoted) keep their exact-substring semantics.
+- **Five more rules carry an evidence signature** (6 of 64, up from 1): `resilience-retry-backoff`, `resilience-multi-provider-fallback`, `security-mcp-server-pinning`, `security-code-execution-sandbox`, `security-tool-change-reapproval` — each a conventional idiom the rule text prescribes, each with a `nonScope` stating what a match does NOT prove. Rules whose idiom is illustrative rather than a code token stay unsigned, and the refusals are named in the commit.
+- **The run names the signed share of the verdict**: "N of M `applied` row(s) rest on a signed rule". Counted, never gated; additive JSON (`evidence.signed`).
+
+### Overclaim rules externalized ([ADR-0050](docs/adr/ADR-0050-the-public-claim-is-narrowed-to-the-provable-form.md) decision 2, structural part)
+
+The forbidden-claim list moves out of the CLI test into `src/lib/claims-rules.ts`, shipped with the package, so a site-build guard can consume the same list from the pinned dependency — one source, no drift. No behaviour change; the guard's three meta-guards are intact. ADR-0050 stays proposed (its site-copy decisions need the site repo).
+
+### Migration — this release reddens some green missions on purpose
+
+After `runward update` refreshes a mission's rule corpus (or on the next `check --strict` for a mission that judges against the package corpus), two populations turn red. Both are the mechanism working, and each has a one-line fix:
+
+1. **A pointer symbol that was a fragment of the real identifier.** If an `applied` row's `#SYMBOL` passed only because it is a substring of a larger identifier (e.g. `#guardFields` over `guardFieldsLegacy`), it now reads "symbol not found". **Fix:** point at the real identifier, or drop the `#SYMBOL` to keep the bare path.
+2. **A prose `applied` row on one of the five newly-signed rules.** A signature makes file-backed evidence mandatory for `applied` rows, so an `applied` row that carried only prose (no `file:`/`test:` pointer whose content matches the idiom) now reds with "cited, not applied". **Fix:** point the row at evidence that carries the rule's shape, or answer `n/a` / `deviated` with a reason — a rule the mission does not implement was never meant to be `applied`.
+
+The two reference missions (runward's own, and the shipped `request-triage` example) are strict-green under this release; every change was validated in both directions on each.
+
+## 0.33.5
+
+**No verdict changes. The canary for [ADR-0049](docs/adr/ADR-0049-the-build-is-isolated-from-the-publish.md): the first release whose provenance is signed by the isolated builder.**
+
+The tarball is built, tested and its provenance signed inside `build-and-attest.yml`, a reusable workflow whose steps `release.yml` cannot reach into; the signing certificate names that file. The publish job packs the same commit itself and refuses to publish a builder tarball that does not byte-match — the reproducibility re-proof, executed at release time rather than promised. `npm publish` stays in `release.yml` under OIDC trusted publishing, unchanged.
+
+Written before the tag, as with the 0.33.4 canary. What this release must establish:
+
+```sh
+gh attestation verify runward-0.33.5.tgz --repo stranxik/runward \
+  --signer-workflow stranxik/runward/.github/workflows/build-and-attest.yml
+```
+
+passing on the published artifact; the determinism cross-check holding; and a local rebuild of the attested commit still reconciling byte for byte. `verify-release.yml` requires the signer identity on this release's run, so the outcome is loud in both directions.
+
+No SLSA level is asserted anywhere. The sentence naming what the mechanism is documented to provide is frozen verbatim in the overclaim guard (`FROZEN_CITATIONS`), and every paraphrase of it faces the rule — the regex accident that used to let it pass became a decision, tested in both directions.
+
+Worth recording: the first CI run of this chain caught a real mistake — the builder wiring was applied, tested green locally, then silently reverted by the restoration step of the very guard-bite checks meant to prove it was guarded, and the stale local run was believed. The extended posture guard reddened on `release calls the isolated builder` at its first outing. The commit message of the fix carries the lesson: restore from a saved copy, never from HEAD, when the working tree holds uncommitted work.
+
+## 0.33.4
+
+**No verdict changes. This is the canary release for [ADR-0048](docs/adr/ADR-0048-the-release-carries-verifiable-proof.md): the first release whose build provenance is attested and attached, and the first the release proves under its own verifier.**
+
+### What this release is the proof of
+
+- **The provenance path.** `release.yml` now attests build provenance for the tarball (`actions/attest-build-provenance`, own SHA pin) and attaches **two** bundles under locked names: `runward-0.33.4.intoto.jsonl` (SBOM attestation) and `runward-0.33.4.provenance.intoto.jsonl` (build provenance). Until now the GitHub attestation store held no provenance for the tarball — `gh attestation verify` with no flag answered HTTP 404, measured 2026-08-11 — because the provenance lived on npm alone, which gh does not read. From this release, `gh attestation verify runward-0.33.4.tgz --repo stranxik/runward --predicate-type https://slsa.dev/provenance/v1` is expected to pass from the release assets, offline included. This changelog entry is written **before** the tag: whether it holds is exactly what the canary establishes, and `verify-release.yml` requires it on this release's run — a missing bundle reds the release (`test -s`), and a failed verification reds the verify run.
+- **The verifier.** `.github/workflows/verify-release.yml` replays `docs/verifying-a-release.md` against the published artifacts after every release: cross-store hash, attestation verification with identity, offline verification from the attached bundle, and a negative control (a corrupted tarball must fail). Proven by dispatch against v0.33.3 before this release; this is its first release-triggered run.
+
+### Also in this release (shipped on main since 0.33.3)
+
+- **`docs/verifying-a-release.md`** — the replayable verification an enterprise runs, expected outputs verbatim, offline path (three files suffice), second verifier with pinned identity, negative controls, and the closing paragraph on what none of it proves: a signature establishes who **attested** these bytes, never that the code is sound.
+- **ADR-0048** — locked asset names (a rename to `.sigstore.json` would downgrade the Scorecard category from provenance to signature, established at source against ossf/scorecard v5.5.0); slsa-github-generator refused for three sufficient reasons (non-maintenance notice merged 2026-08-07, Node builder never left beta, `NPM_TOKEN` publish path regressing from OIDC trusted publishing); the isolated-builder path deferred with named preconditions, not refused.
+- **Backfill** (release assets, not code): v0.32.0 through v0.33.2 now carry their tarball and SBOM attestation bundle, each verified — signature, workflow identity, digest, then re-verified offline from the restored bundle — before attachment, with a dated note in each release. Side effect, measured then confirmed on the public scorecard: Signed-Releases 0 → 10, global score 6.1 → 6.9. The score reads filenames and verifies nothing (its own documentation says so); the deliverable is the procedure, the score is its shadow.
+
+## 0.33.3
+
+**No verdict changes.** The release path now carries its own proof, two claims that were true became enforced, and the gate's requirements are stated one at a time with the test that exercises each.
+
+### The release carried no proof
+
+Until 0.33.3 a GitHub release carried the SBOM and **nothing else** — not the tarball, not a single attestation. The provenance existed (`npm audit signatures` returns it, and deps.dev shows Google verifying it independently) but it lived on the npm registry, and a GitHub release is where most people look.
+
+So OpenSSF Scorecard read the release assets and answered, verbatim: *"Project has not signed or included provenance with any releases"*, scoring Signed-Releases **0/10**. The project's own public scorecard contradicted its strongest claim, across at least three releases.
+
+The real bundle now goes up under the `.intoto.jsonl` name the ecosystem reads, with the tarball beside it — an attestation whose subject the reader cannot fetch from the same place proves nothing they can act on. `test -s` reds the release rather than shipping a silent gap. **This release is the first proof that the path works**; it could not be tested any other way.
+
+### Two lines the compliance sheet could only assert
+
+- **`npm audit --audit-level=high` runs on every pull request.** There was no such job: `grep -rn "npm audit" .github/workflows/` returned nothing, and a HIGH advisory sat green and unmerged while a release was cut. Scoped to high and above on purpose — a floor at `low` reds on advisories nobody would act on, and a guard that cries on the safe case gets switched off.
+- **Line coverage is measured and held above a committed floor.** The `coverage` script existed and nothing called it. A **ratchet, not a target**: floor at 78 against a measured 80.41, moved only by a deliberate commit. [ADR-0046](docs/adr/ADR-0046-mutation-testing-is-an-instrument-not-a-gate.md) refuses a threshold on the *mutation* score for reasons that do not transfer — a mutation score is a property of the tests, whereas line coverage is recomputed from scratch on every run.
+
+### Tool operational requirements
+
+[`docs/compliance/tool-operational-requirements.md`](docs/compliance/tool-operational-requirements.md): **51 requirements** over the verdict surface, each citing a test file and a case name inside it. The substance was already in `runward/contracts/port-contract.md` — in prose, with zero identifiers. Prose cannot be checked off.
+
+Each entry states what a green **leaves open**, per requirement, because `GATE_NON_SCOPE` is too coarse to answer a question about one line.
+
+It is **not a qualification kit**, and says so: a vendor kit's documents are produced under a quality system a third party has assessed, and these are not. Its traceability guard checks that a citation **resolves**, never that the cited test is **relevant** — the same class of limit stated one floor below. Section 10 names what carries no requirement at all.
+
+### Why runward issues no attestation about your application
+
+Section 5.4 of the regulated-adoption sheet answers a recurring question with **no**, in any form, and the reason is measured rather than principled: the machine contract cannot distinguish a substantial mission from one carrying no project code, the corpus belongs to the audited party, the seal date is the mission's word, and issuer, subject and verifier would be the same party. What can be published instead is a **replayable record, by the operator, in their own repository** — with the admission that on a private repository the only level that checks content is unavailable to an outside reader.
+
+### Test suite
+
+**428 → 435**, and 98 mutants that survived the entire net now die. Re-measured before instructing: the derived figure was 199, the measured one 179, because twenty had been killed by tests that never aimed at them. 81 survivors remain, filed as a register rather than a backlog.
+
+## 0.33.2
+
+**No verdict changes. Four places where the output claimed more than it established, or less than it knew.** All four came out of an investigation into whether runward should issue an attestation that an application was built with it. The answer to that was no, and the reasons produced this release.
+
+### The machine surface was quieter than the terminal
+
+`check --strict --json` carried no counters, no corpus status, no seal. An agent driving on `--json` — which is how this tool is meant to be consumed, and how a CI reads it **blind** — could not tell a mission carrying real evidence from one answering `n/a` to every row. Both said `verdict: "clean"`.
+
+That inverts [ADR-0045](docs/adr/ADR-0045-the-gate-cannot-be-satisfied-by-paperwork.md)'s own finding one layer out: the worst case must not be the quietest.
+
+| | reference mission | same mission, every row `n/a` |
+|---|---|---|
+| before | `verdict: clean` | `verdict: clean`, **identical object** |
+| after | `applied 23 · na 13 · typed 20` | `applied 11 · na 25 · typed 8` |
+
+Additive per ADR-0030: `evidence`, `corpus`, `seal`, `criticalScope`, `gateNonScope`, all under `--strict` only. **`gateNonScope` travels with the counters on purpose** — a consumer that keeps the numbers and drops the caveat is the next entry.
+
+### The declared non-scope shipped in one pack out of four
+
+Measured on generated packs: present in the ISO/IEC 42001 draft, **absent** from the NIST AI RMF draft, the EU AI Act draft, and the OSCAL component-definition. The artifact that leaves for a third-party GRC tool was the one carrying no reservation, and the prose around a pack does not travel with it. A caveat that stays home was not made.
+
+All four carry it now, the OSCAL one in its metadata `remarks` so it survives ingestion.
+
+### The gate demands 31 of the 45 CRITICAL/HIGH rules
+
+The conformance section printed *"Architect: 6 rule(s) accounted for … Govern: 12"* and stopped, which reads as though the critical set were covered. It is not: 14 rules are mapped to no gated phase and are never asked about, **five of them CRITICAL**, including `checklist-pre-production-security` and `checklist-pre-production-resilience`.
+
+Reported, never gated. A rule with `phases: []` is documentation the operator may apply without the gate asking, and gating it would red every honest mission on day one. Leaving it unsaid was the defect, because it let a reader believe a sentence the output never supported. The count and the list are printed, and `criticalScope` is in `--json`.
+
+### The seal date is declared, not observed
+
+`runward/evidence-lock.json` carries `sealedAt`, and nothing signs the lock. Editing the field by hand yields `✓ seal intact — sealed 1999-12-31` with exit 0. **Nothing changes for an honest user** — `check --freeze` writes the real date, as it always did — and nothing here is repairable: an unsigned file inside the audited repository cannot testify about itself. What the seal proves is unchanged: the cited files still hash to what they hashed when it was written. The printed line and the machine surface now say the *when* is the mission's word.
+
+Recorded as RWD-2026-0022 and RWD-2026-0023 in `docs/compliance/known-defects.md`, under a section that says plainly these are properties of where the data lives, not bugs awaiting a patch.
+
+### Method note
+
+Every guard added here was checked **by removing the fix**: drop `gateNonScope` from the payload, remove the reservation from the drafts, stop computing `criticalScope` — each one reds. A guard nobody tried to break is a guard nobody has tested.
+
+## 0.33.1
+
+**A false green, in the release published this morning.** One `rm` on a file the audited party owns, and a corpus of 64 rule files reduced to the word `ok` crossed the gate.
+
+```
+64 rule files reduced to "ok", scaffold-lock.json present  ->  exit 1
+64 rule files reduced to "ok", scaffold-lock.json deleted  ->  exit 0
+```
+
+Reproduced against `runward@0.33.0` installed from npm, not against a working tree.
+
+### What was open
+
+`corpusDivergence` answers `unrecorded` when a mission keeps its own rule copy and carries no `scaffold-lock.json`. That is a compatibility path for missions predating the lock, and it printed a warning while contributing **nothing** to the verdict.
+
+The lock lives in the audited repository. So *"this mission predates the lock"* and *"someone deleted the lock"* are the same observation, and the second costs one command. **[ADR-0045](docs/adr/ADR-0045-the-gate-cannot-be-satisfied-by-paperwork.md) class 1 reopens by deleting a file instead of re-signing it** — and `docs/compliance/known-defects.md` called that class closed.
+
+It is also the aggravating form ADR-0045 names, one storey up: the gate said it could not check, in prose, next to a green exit code. **Where the gate cannot verify, it says so in the run, and the run is the exit code.**
+
+### The fix, and what it leaves alone
+
+`unrecorded` is a named line of the verdict from this release. Verified in both directions: the fabricated corpus with the lock deleted goes from exit 0 to exit 1 with a reason; the shipped example, a mission with no local rule copy (`package`), and runward's own mission all stay at exit 0. A legacy mission is one `runward update` away, and the safest configuration — no local copy at all — was never the one punished.
+
+Guarded twice: `test/unit/verdict.test.js` pins both directions and kills two mutants, and `test/audit-corpus.js` replays it end to end. **The first draft of that replay was decorative** — it renamed the rule files, so every manifest row cited a slug that no longer existed and the mission reddened on conformance, which made the case pass with the fix removed. It guts the bodies in place now and fails without the fix.
+
+### How it was found, which belongs in the record
+
+Not by re-running the audit method ADR-0045 says to re-run on any release touching these modules. By an investigation into an unrelated product question, where an analyst asked to build the cheapest mission that would earn a hypothetical attestation built it. **A reevaluation trigger is only as good as whoever remembers to pull it.**
+
+ADR-0045 gains an amendment stating that class 1 was not closed, rather than leaving a ratified decision claiming a closure that did not hold. `known-defects.md` gains RWD-2026-0021 and corrects the RWD-2026-0001 entry.
+
+### Also
+
+- The SBOM round-trip guard shipped yesterday with `workflow_dispatch` only, which was the defect it exists to prevent: a guard someone has to remember is a guard that does not run. It fires on any pull request touching `release.yml`, which is what every Dependabot bump to `download-artifact` or `anchore/sbom-action` does.
+- `chalk` 6.0.0. Verified with colours forced, since the suite redirects to files and emits no escape sequence at all: six outputs captured on 5.6.2 and 6.0.0, **byte-identical**.
+- Dependency advisories closed (`js-yaml` 5.2.3, `fast-uri` 3.1.5). `npm audit` reports 0 in the repository; an installer already got 0, since both are development dependencies.
+
+## 0.33.0
+
+**0.32.0 fixed what an audit found. This one measures what the net that guards it would catch, and publishes the answer with everything in it that counts against us.** No behaviour of the gate changes: 24 golden outputs across four missions and six flag combinations are byte-identical to 0.32.0, exit codes included.
+
+### How much does this test suite actually detect
+
+A full mutation pass (Stryker 9.6.1) on the seven library modules the verdict is computed from. **Mutation score 60.78 per cent**: 2 973 mutants, 1 769 killed, 38 timeout, 1 166 survived, in 2 h 35.
+
+A survivor count is not a defect count, and treating it as one produces a day of false findings. So: 433 survivors carry mutators able to flip a *decision* and were re-run against the whole net (unit suite, self-gate, OSCAL validation, end to end smoke); **53 died there, 380 survived everything**. Then 246 of those were instructed one function at a time, each by applying the mutant to a real mission and reading the verdict rather than reasoning about the code. **181 now die**, measured centrally rather than claimed.
+
+Three mechanisms were **correct in every shipped release** and guarded by **no test**:
+
+- **Seal tamper detection.** One field returned false in `verifyEvidenceLock` takes a sealed, tampered mission from exit 1 to **exit 0**: `check.ts` gates the whole seal section on it, so the violations were neither printed nor counted. Reproduced by hand on a mission sealed with `check --freeze`.
+- **The ReDoS screen** ([ADR-0020](docs/adr/ADR-0020-rule-evidence-signatures.md)). The loop collapsing nested groups was entered by no fixture and could be deleted with the suite still green.
+- **Pointer containment.** The repository fallback was dead code under test: every containment test ran in a bare temp directory, where no repository marker exists above the base.
+
+One correction the pass forced on its own reading, and the reason [ADR-0046](docs/adr/ADR-0046-mutation-testing-is-an-instrument-not-a-gate.md) exists: **a surviving mutant is not automatically a false green**. Forcing `artifactState` to call every ADR directory `filled` survives the unit suite, the self-gate, the smoke run *and* the audit corpus, and the mission is still **refused**, because a typed pointer does not resolve. Defence in depth. What it corrupts is the printed line, and for this tool a proof surface that lies under a correct verdict is a defect of its own.
+
+Mutation testing is adopted as an **instrument, never a gate**. No score is ever a crossing condition: a number in a manifest is a verdict satisfied by a figure nobody re-derived, which is what [ADR-0045](docs/adr/ADR-0045-the-gate-cannot-be-satisfied-by-paperwork.md) forbids, and runward does not do to itself what it refuses from an operator. What is opposable is a **ratchet on a named perimeter**.
+
+### The verdict is now computed where a test can reach it
+
+The largest absence of that measurement was the one that mattered: `src/commands/check.ts`, where the verdict is assembled and the exit code chosen, sat at **8.70 per cent line and 0 per cent function coverage**, no unit test imported it, and the mutation pass could not reach it at all.
+
+`src/lib/verdict.ts` is now a pure reading of the mission: it prints nothing, never touches `process.exitCode`, runs no hook. `check.ts` renders it and exits on it. `verdictFrom()` is the single definition of "clean", exported so the command cannot grow a second copy below the render. **97.79 per cent line, 100 per cent function**, and inside the measured perimeter from now on. 12 hand-written mutants, 11 killed; the survivor is argued rather than assumed ([ADR-0047](docs/adr/ADR-0047-the-verdict-is-computed-where-a-test-can-reach-it.md)).
+
+### What we publish about ourselves
+
+- **`docs/compliance/known-defects.md`**, 20 entries in four classes, each with the version range it affects and the command that verifies it. It lists **both directions**: the undue passes and the five undue refusals that shipped in 0.31.x. A register that only published false greens describes half a campaign and is falsifiable in one command against this project's own changelog.
+- **`docs/compliance/regulated-adoption.md`** gains the axis it was missing. It was written on the shape of a SaaS questionnaire, artifact integrity plus project health; the axis that decides for a tool that renders a verdict, **whether the verdict is right**, was absent from all 82 lines. New section 8 works the tool confidence analysis through for medical device, automotive, rail and airborne software, **adverse case first**, and asserts no level and no class for runward in any scheme.
+- Its footer no longer says every verifiable claim on the page is enforced in CI. That was a reassuring count over a set the author chose, which is the exact failure mode ADR-0045 records in the gate itself.
+- One published falsehood corrected: `GATE_NON_SCOPE` is **not** printed in every compliance pack. Measured, it appears only in the ISO/IEC 42001 draft. The NIST AI RMF pack, the EU AI Act pack and the OSCAL component-definition carry nothing, and the pack it is missing from is the one that goes to a high-risk provider.
+
+### Guards that had a broken perimeter
+
+The recurring defect of this repository, four instances in one week:
+
+- **The reproducible-build job had never once compared two tarballs.** `npm pack --pack-destination` does not create the directory, so it exited ENOENT on its own output path. The claim it guards is true, verified by hand; the guard simply never reached the comparison.
+- **The overclaim guard** saw neither `TQL`, nor `TCL2/3`, nor the rail classes, and nothing refused declaring a normative clause satisfied. Widened *before* the section that produces that risk was written, not after.
+- **`CITATION.cff` was pinned at 0.21.0** for eleven releases, while `packaging.test.js` already guarded the roadmap against the same failure mode.
+- `docs/compliance/eu-ai-act.md` contradicted itself two lines apart on the high-risk binding date, and the compliance README carried the superseded one.
+
+### Also
+
+- `test/audit-corpus.js`: the adversarial campaign behind ADR-0045 becomes a corpus anyone can replay against the real CLI, 9 refusals and 4 acceptances, with a sanity guard asserting the reference mission is green before any case runs.
+- `regimes/eu-ai-act@2026-1744.json`: the expired sheet had missed an amending regulation. The dated-facts watch now detects that the **text** moved instead of waiting for a date we guessed.
+- Unit suite **209 → 342**. Whole-project line coverage 74.90 → 79.70 per cent.
+
+## 0.32.0
+
+**The largest correctness release this project has had.** Five adversarial audits, every case executed against the shipped binary rather than reasoned about. Three asked "how do I get a false green"; two asked the opposite, "where does the gate cry on a mission that is telling the truth". Both halves were needed: **of the nine hardening classes written in the morning, four cried on the honest case.**
+
+### The gate could be satisfied by paperwork
+
+`check --strict` exited 0 on missions containing **no evidence at all**. The cheapest cost 2 726 bytes of arbitrary text and zero lines of project code — with the seal applied and the ISO 42001 pack assembled on top. The aggravating form: the emptiest missions produced the most reassuring output. Citing each rule's own file printed `36 of 36 typed pointers the gate opened and checked (100%)`.
+
+- **The corpus is wired to the verdict.** The gate judges a mission against a corpus the mission *owns*. [ADR-0002](docs/adr/ADR-0002-harden-the-strict-gate-against-vacuous-passing.md) closed rule removal; substitution and fabrication passed, because its floor counts *cardinality* over a set the adversary controls — twelve files containing `ok` satisfy `govern: 12`. The authority is now the **installed package**, outside the repository; `scaffold-lock.json` keeps its real job, telling an upstream change from a local edit.
+- **Circular evidence is refused.** `file:<manifest>#<slug>` was a universal green key: the slug is column 1 of every row.
+- **The ADR layer matches the evidence layer.** A 0-byte file, `ADR-0000-template.md`, a rejected or unratified decision each satisfied a deviation. Refused by name.
+- **Containment actually runs.** `resolveFile` was purely lexical: a symlink to `/etc/hosts` passed and was read, turning the seal into an arbitrary-file read oracle.
+- **The seal covers the claim**, not only the files it cites; sealing zero files is refused; an unknown lock `version` is refused.
+- **The counter no longer goes quiet at the worst moment.** It printed only when `applied > 0`, so answering `n/a` to all 36 rules removed the only vacuity signal. It now always prints `N applied · N deviated · N n/a`.
+- **The grammar is read before anything rewrites it.** Quotes honoured before the `;` split; the apostrophe is not a delimiter (`#'l'invariant tient'` made the gate look for `l`, true of every file); every pointer in a cell parsed, not just the first; duplicate `Rule conformance` sections refused rather than arbitrated; fenced tables are illustrations.
+- **A signature cannot hang the gate.** `unsafeSignature` excluded `(?:...)`, so `(?:a+)+b` ran over 20 s on 38 characters.
+
+### The gate refused honest missions
+
+- **A Windows checkout turned the corpus into a fabrication.** `core.autocrlf` rewrites every file and `/^---
+/` does not match `---
+`, so all 64 rules read as empty and the gate announced *"the mapping may have been stripped"*. Git doing its documented job accused the operator.
+- **npm/pnpm workspaces broke** under the containment hardening: `packages/api/src/shared -> ../../shared` stopped resolving, with no spelling that worked. Containment now accepts a target inside the enclosing repository, found by a marker on disk — never by reading git configuration ([ADR-0039](docs/adr/ADR-0039-the-operator-layer-stays-outside-the-cli.md)).
+- **An unreadable file was a crash, not a verdict**, and `--json` stopped being JSON.
+- **The gate punished precision**: a path outside the project passed as prose and failed as a typed pointer.
+- **A documentary rule could not be proven.** The usage registry and the named successor have no evidence but the section stating the fact. A pointer may now cite a fact stated *outside* the manifest table.
+- **House rules are welcome again.** Only an extension that would count toward the non-vacuity floor is refused.
+- **A green here is a green in CI.** `file:SRC/Guard.TS` resolved on macOS and failed on Linux; it is refused here, with the on-disk spelling resolved segment by segment.
+
+### What this changes for you
+
+**Missions that were green may go red** — a hand-edited rule, a deviation resting on an unratified ADR, a circular pointer. Those verdicts were about something other than what they claimed. **Missions that were red may go green** — every Windows checkout, every workspace.
+
+Nothing changes in the exit-code contract, the machine surface, or the six phases. And none of this makes the gate judge whether evidence *implements* a rule: `GATE_NON_SCOPE` is unchanged and remains the honest statement of depth. See [ADR-0045](docs/adr/ADR-0045-the-gate-cannot-be-satisfied-by-paperwork.md).
+
+## 0.31.0
+
+An adversarial fact-check on [the v0.30.0 article](https://runward.dev/news/2026-08-01-six-tests-that-could-not-fail/) re-tested every claim it made. **Two of the three mutations published as harmless were live defects**, and the corrected figure in the same article was itself wrong. Both fixes are here; the article is corrected on the site.
+
+- **`territory.ts` bracket balance.** A `#` two characters past an opening quote was taken for a comment, the line truncated, an inline array lost its `]`, and the balance loop swallowed the rest of the file. The `#` need not sit on a line runward reads: a documentation URL with an anchor inside `[vars]`, a table never consulted, destroyed the `[triggers]` below it and a HIGH rule silently stopped surfacing. The published reasoning argued line by line about an automaton that carries state **across** lines.
+- **`territory.ts` derivation notes.** The binding-source check could mean *"no other manifest produced anything"* instead of *"this one produced nothing"*: a false note beside a cron just derived from that same file, a real absence silenced, and a note naming **the wrong manifest**. No exit code moved, which is why it was first filed as "an informational message" — but evidence pointing at the wrong file is not classified by its output channel.
+- **`gatedPhases` is published in the rules envelope** (`rules --json`, `--for`, `explain`), read from `GATED_DELIVERABLES` rather than restated. The site's catalog had computed "rules the gate can require" from a hand-written literal missing `handover`, understating the gate by four rules, one of them CRITICAL. Additive field per [ADR-0024](docs/adr/ADR-0024-machine-surface-of-the-rule-set.md); `port-contract.md` updated.
+- **The one survivor that really is equivalent is now guarded on its reason, not its symptom.** `mission.ts`'s line filter is equivalent across 3267 comparisons, but only while every shipped template ends with a newline. Strip one and a deliverable flips `in-progress` to `filled`, opening a phase. A test now pins the invariant; it deliberately does not kill the mutation.
+
+Every guard proven able to fail: each mutation reddens its own test and only it, removing a template's trailing newline reddens the invariant guard, and reintroducing the old `BUILD_PHASES` literal verbatim reddens the contract guard.
+
+## 0.30.0
+
+An internal-validity pass: instead of adding surface, mutate the source and see whether the tests notice. **42 valid mutations, 36 killed or type-caught, 6 survivors** — three of them real holes. Everything below was found by measurement, not by reading.
+
+- **`AGENTS.md` now carries the gesture its own obligation needs.** It already told the agent to *"confront them at the point of action, not from memory"*, then named only `runward explain <rule>` — which reads a rule whose **name you already know**. It never said how to find out **which** rules govern the file being touched. `runward rules --for <paths>` is now in the same sentence, with the honesty clause that must travel with it (rules declaring no territory are counted, never matched). This is not an extension of [ADR-0042](docs/adr/ADR-0042-craft-rule-confrontation-is-continuous-not-a-gate-crossing-ritual.md), which deliberately kept the step out of the non-building workflows: `AGENTS.md` is not a workflow, it is the contract handed to the agent every session, and it already carried the obligation. **`update` does not refresh `AGENTS.md`** and is right not to — it is a mission deliverable ([ADR-0010](docs/adr/ADR-0010-agents-md-as-a-first-class-handover-deliverable.md)), so existing missions do not receive this; new ones do.
+- **The traversal guard on evidence pointers had no test.** Collapsing the containment check in `resolveFile` survived the whole suite — on the path **every `applied` row goes through**. `verifyEvidenceLock` had its traversal test; pointer resolution did not. Now pinned: a `../` climbing out of every base is refused even when the file really exists, and a sibling directory sharing the base's prefix (`/a/project-evil` vs `/a/project`) is not inside it.
+- **Nothing pinned that runward works from inside a repo.** Stopping the `findMissionRoot` climb on its first iteration survived — and climbing to the mission root is the one behaviour that makes `runward check` usable from anywhere, which is how it is actually run. Pinned from three levels down, from the root, and an orphan directory resolving to nothing rather than adopting a mission above it.
+- **A `*` that crossed a path separator went unnoticed, and a block comment that ate its line too.** The first would make a declared territory silently **wider** than declared, surfacing rules on files they do not govern; the second would drop whatever follows `/*` on the same line of a `wrangler.jsonc`. Both are red under mutation now.
+- **When NOT to seal, measured and written down** ([ADR-0021 amendment](docs/adr/ADR-0021-blocking-drift-and-evidence-sealing.md)). Sealing this repository would seal 25 files, and **25 of 25 changed within 30 days** — a committed lock here would turn `check --strict` red on the first commit after every seal. The opt-in was right; the boundary was written nowhere, and an operator in a regulated setting is exactly the one who would seal everything on principle. **Seal what has stopped moving**: a handover, a release, a version entering operation.
+- **The release stamp guard sweeps instead of listing.** It stopped at the first stale manifest, read one stamp per file (missing `marketplace.json`'s second), and checked a hand-kept list a new packaging could be forgotten from. Stamps are now found by walking `packaging/`, `plugins/` and `.claude-plugin/`; every stale one is named at once; the set of stamped files must equal the declared inventory exactly.
+
+**Three survivors were not holes, and saying so is part of the result.** A `readToml` mutation is near-equivalent on well-formed TOML; the other two affect a line count and an informational note, not a verdict. **107 candidate mutations were not tried** — the bench is bounded per file. This is a sample, not a proof of coverage.
+
+## 0.29.0
+
+Two defects found on the **first field use** of v0.28.0's territory map, by the mission that asked for it. Both of the same species: a mechanism that is correct and unreachable is not a mechanism. [ADR-0043](docs/adr/ADR-0043-territory-is-declared-in-two-parts.md) amended.
+
+- **`runward/territory.md` is now read under `#`, `##` or `###`.** The mission titled theirs `# Territory` and the map was silently voided. The diagnostic existed and said the right thing — at line 16 of a 28-line output nobody scrolls. A map the operator believes is active and runward ignores is exactly the state v0.28.0's "every refused row is named with its line" rule exists to prevent; counting `#` reintroduced it one level up, at the file. A heading of any level still ends the section, so a following `# Notes` table is never eaten.
+- **A map that could not be read now says so first**, under its own `This map was not read` heading, above every match: *"Everything below is derivation only — your declarations had no effect."*
+- **`Territory coverage` moves from `characterize` to `status`.** v0.28.0 put the anti-rot instrument in the one command a governed mission has no reason to run: `characterize` announces it targets ungoverned repositories, and writes a `characterization.md` that is not a mission deliverable — the reporting mission deleted the file after reading it. `runward status` is the governed-mission read, at the same groom cadence, and it writes nothing. Files walked, files carrying a category, and map rows that matched no walked file with their line numbers — unchanged, reachable.
+
+- **The release stamp guard now sweeps instead of listing.** Bumping 0.28.0 → 0.29.0 exposed three defects in the guard itself, all of the same species as the two above. It stopped at the *first* stale manifest, turning a release bump into a guess-and-retry loop when it already knew the whole answer. It read one stamp per file, so `.claude-plugin/marketplace.json`'s second stamp (`plugins[].version`, beside `metadata.version`) was never verified. And it checked a hand-kept list, so a future packaging carrying a product version and forgotten there would have shipped mislabelled, green. Stamps are now found by walking `packaging/`, `plugins/` and `.claude-plugin/` for any `"version": "x.y.z"` at any depth; every stale one is named at once; and the set of stamped files must equal the declared inventory exactly, which fails on a new manifest *and* on a vanished one. A host's own schema version (kiro's `"v1"`, copilot's `1`) stays out of scope by shape rather than by an exception someone must remember.
+
+An ungoverned repository no longer gets the measure. That is correct: with no `runward/` there is no map and nothing to be inert.
+
 All notable changes to the Runward tooling. Newest first. What is ahead lives in [ROADMAP.md](ROADMAP.md).
+
+## v0.28.0 — the mission says what a manifest cannot — 2026-07-31
+
+[ADR-0043](docs/adr/ADR-0043-territory-is-declared-in-two-parts.md) complete. A deployment manifest declares an **execution topology** — an entry module, a schedule — never the nature of the code behind it. v0.27.0 derived the first half; this ships the second, and the mission that reported the gap now sees **both** rules it violated in July, not one.
+
+- **`runward/territory.md` — the mission declares which of its files carry which category.** Four columns (pattern · category · effect · why), and precedence **named in three places rather than inferred**: the last matching row wins per (path, category); derivation < map < a rule's own `appliesTo`, **which the map may never narrow**. The map may remove what runward *guessed*; it may never remove what the maintainer *decided* — a mission able to silently shrink its own coverage would be the weak verifier [ADR-0040](docs/adr/ADR-0040-per-rule-non-scope-declaration.md) refuses.
+- **Markdown by necessity, not taste.** The match reason must carry `<source>:<linenum>`, and `JSON.parse` destroys positions. `remove` is a column rather than a `!` prefix, because the glob dialect declares "no negation" and a character that inverts a line disappears in a diff.
+- **Every refused row is named with its line.** An unknown category, an empty `why`, a bad effect, a path escaping the project, a short row — each is reported, never dropped. A row the operator believes is working, that runward ignored, is the worst state of all. Rows inert *by construction* are found too: a category no rule governs can never surface one, and a `remove` for a category nothing derives removes nothing.
+- **`characterize` gains `## Territory coverage`** — files walked, files carrying a category, and **map rows that matched no walked file, with their line numbers**. `rules --for` structurally cannot measure this: it only ever sees the paths its caller passed. Without this section, ADR-0043's own reopening condition on inert rows would have been a trigger nothing observes.
+- **The vocabulary grew by one, on field evidence.** Ratification named seven categories; a mission showed `configuration` was too coarse — two rules shared the word with different subjects, so declaring a file "configuration" would have surfaced the typed-config rule as a **false positive beside the secret boundary it was meant to reach**. `secret-boundary` is now its own category, and the rule is stated: a category is split when missions must be able to declare its parts separately, never by quota.
+
+The gate is unchanged, no project code is read, and `runward` never writes the map: `init` does not scaffold it and `update` does not refresh it — a file the tool rewrites is a file the operator stops owning, and that ownership is what makes a stale row visible in a diff. Self-gate green: 152 unit tests, smoke OK, OSCAL schema OK.
+
+## v0.27.0 — the nature was declared twice, and nobody read it — 2026-07-31
+
+A rule can now declare the **category** of artifact it governs instead of guessing everyone's directory names, and runward derives which files are in that category from a manifest **the project already wrote**. First increment of [ADR-0043](docs/adr/ADR-0043-territory-is-declared-in-two-parts.md). The deterministic, zero-network gate is unchanged, and no project code is ever read.
+
+On the layout that reported the gap — three Cloudflare Workers as entry files, no `cron/` directory anywhere — `rules --for src/entry.serve.ts` returned nothing in v0.26.0. It now returns the HIGH rule on background-job guardrails, with both levels of the reason: `governs=background-work ← wrangler.serve.jsonc triggers.crons`.
+
+- **`governs:` on the nine rules whose territory reaches the client's tree**, using the seven-category vocabulary named at ratification. They **keep** their `appliesTo`: a category adds reach, it does not replace it. Dropping the globs in the same release would have made `--for src/cron/runner.ts` return nothing on a mission with no manifest — a coverage regression in the release that fixes coverage.
+- **A Cloudflare Workers derivation adapter** reading `wrangler.jsonc` / `.json` / `.toml`: `main`, plus `triggers.crons` and `queues.consumers`. It reads a declaration the operator wrote, never the code behind it, and it derives an **intention** rather than a deployed state — the docs are explicit that commenting the `crons` key does not disable a trigger. A queue *producer* is not background work in that Worker, and Durable Object alarms live in code, so both stay out.
+- **JSONC by a two-state scanner, then `JSON.parse` — not by regex.** Cloudflare's own canonical example carries `//` comments and trailing commas, so `JSON.parse` fails on the *nominal* case; and a regex would eat the `//` inside `"https://example.com//v2"`. What does not parse throws, so refusing is free.
+- **TOML by a table-path automaton — not a line-scan.** Table headers are absolute paths, so a cron declared under `[env.production.triggers]` is named as such, and order-independence comes for free. A line-scan was measured reporting a production cron as the root schedule, and reading a `[triggers]` block inside a `"""` string as a declaration.
+- **Several named manifests are several Workers**, each authoritative for its own entry — `wrangler -c` is how one repository holds a fleet, which is the shape that reported the gap. The genuine ambiguity is narrower: two manifests claiming the *same* entry, where nothing is derived and the conflict is named.
+- **A new state, `unresolved`.** A rule declaring a category nothing binds here has not been evaluated — that is neither a scope nor a backlog, it is a missing binding, and `--for` says so under "Could not be asked". Resolution is mission-wide, matching is per-path: a category is unresolved only when no file anywhere carries it, never merely because the paths asked about fall outside it.
+- **`unscoped.count` keeps its arithmetic**, and therefore its extensional meaning (no territory in *any* carrier). Its old gloss — "rules `--for` could not evaluate" — is now false, and `port-contract.md` says which. **A consumer reading it as a completeness denominator under-counts**: named here rather than left to be discovered.
+
+Two defects fixed before they could bite: `explain` fell through to "not ruled on yet — an omission, not a scope" for a `governs:`-only rule, describing the best-decided rule in the corpus as an omission; and the partition test was a **tautology** whose three predicates were exhaustive by construction, so it could never fail and would have stayed green while the thing it guards became false. Self-gate green: 139 unit tests (+18), smoke OK, OSCAL schema OK.
+
+## Ratification — territory declared in two parts — 2026-07-31
+
+[ADR-0043](docs/adr/ADR-0043-territory-is-declared-in-two-parts.md) is ratified, ahead of its 2026-12-01 deadline. **Nothing is built yet**, and the ADR says so plainly: ratify, then the vocabulary and the first derivation adapter, then the mission tier. **No CLI behaviour changes.**
+
+- **The initial category vocabulary, named at ratification as the trigger required: seven**, derived from the nine shipped rules whose territory reaches the client's tree, none speculative — `background-work`, `scheduled-work`, `configuration`, `schema-migration`, `port-adapter`, `model-provider`, `startup`. Closed and small on purpose: a category is added when a shipped rule needs one, never in anticipation. The five rules whose paths runward scaffolds itself (`AGENTS.md`, the four `topology-*`) keep `appliesTo:` and gain no category — their paths really are invariant, which is the case the ADR preserves.
+- **The first derivation adapter, named: the Cloudflare Workers deployment manifest.** `wrangler.jsonc`/`wrangler.toml` already declares the entry module (`main`) and its triggers (`triggers.crons`, queue consumers) — a normed file the operator wrote. runward derives the category from that declaration, never from the code behind it. Chosen first because it serves the population that reported the gap, and because it is the cleanest instance of the principle: the nature was declared twice already and nobody read it.
+- **The two prior-art warnings are accepted, not dismissed.** A hand-typed taxonomy goes empty, so derivation stays the default gesture rather than the fallback. Any map the repository maintains rots, so the bidirectional report (files no rule governs, **and** rules that govern nothing) and the pruning of inert entries ship **with** the mission tier, not after it.
+
+## An empty answer, made readable — and the carrier's premise corrected — 2026-07-31
+
+A second field report ran `rules --for` on an entry-file layout (Cloudflare Workers) and got almost nothing back. Measurement corrected its headline — that layout matches three rules, one CRITICAL, through `adapters/` — and confirmed the substance with a number [ADR-0041](docs/adr/ADR-0041-rules-for-paths-declared-territory-with-a-named-match-reason.md) should have computed before ratifying: **six of the 45 CRITICAL/HIGH rules declare a territory that reaches the client's tree.** That is the ceiling under the current carrier, not a plateau. **No CLI behaviour changes beyond the output below.**
+
+- **An empty answer now renders what was looked for.** `--for` prints the declared territories verbatim, and `--json` carries them as an additive `territories` field. A repo whose layout uses none of these conventions can now *see* that, instead of reading a silence. This is ADR-0041's own trigger (a) remedy — "the output shape must change" — in the only form it permits: runward states the patterns it evaluated and says nothing about a tree it has not read. The field report asked for the line "your layout follows no anchored convention"; that is a hypothesis about the client's tree, and it is refused.
+- **The gap that caused the report, closed.** `appliesTo` appeared nowhere in `docs/`, the README or the shipped workflows: the six folder conventions carrying that coverage were **implicit and unprescribed**, so no mission could know what layout would make it match. The rendered vocabulary closes it at the point of use.
+- **The singular `worker` territory, restored.** `services/worker/index.ts` returned zero while `services/workers/index.ts` returned one — an `s` decided the match on a HIGH rule. The editorial pass had dropped `**/worker/**` as "a redundant singular variant"; it was not. The corpus doubles elsewhere (`migrations`/`migration`, `providers`/`provider`), and a test now pins the three pairs. Deliberately not widened to `jobs`/`job` or `ports`/`port`: those singular forms are rare, and adding them by symmetry rather than on evidence is the by-quota error the discipline forbids.
+- **ADR-0041 amended: its premise for the carrier was false.** It argued "territory is a property of the rule, identical across missions", transposing [ADR-0040](docs/adr/ADR-0040-per-rule-non-scope-declaration.md)'s reasoning for a different object — a non-scope really is invariant, a territory is the product of the rule's *subject* (invariant) and the mission's *layout* (variable). The corpus contradicts the premise on its own: the editorial pass anchored two rules to `execution-topology.md` **because runward scaffolds that deliverable itself**, and refused another because it "would have dictated the client's tree". The untouched half stands, though — a per-mission map does get restated and does rot.
+- **[ADR-0043](docs/adr/ADR-0043-territory-is-declared-in-two-parts.md), candidate: territory declared in two parts.** The rule names the category it governs and no path; which files are in that category is derived from what the project already declares (a deployment manifest, an ecosystem manifest — declarations, never code) and completed by the mission where derivation cannot reach. Nothing is built until it is ratified.
+
+## v0.26.0 — no rule is silent about its territory any more — 2026-07-31
+
+v0.25.0 left seven rules unruled: each targeted a real artifact while its own text prescribed no path, so a glob would have been inference presented as an auditable fact. A second pass ruled on all seven, weighing one question per rule — *does the rule already imply a location a sentence could make explicit, or would anchoring add a prescription it does not carry?* — with refusal as the default. **All 64 rules are now ruled on: 14 declare a territory, 50 declare, with a reason, that they have none, and none stays silent.** The deterministic, zero-network gate is unchanged.
+
+- **Five refusals, each a distinct failure mode**, kept on the record because they are the reason the answer is trustworthy. `scaling-db-connection-pooling` would have dictated the client's tree, and its one literal path (`prisma/schema.prisma`) contradicts its own prescription — in that variant pooling lives in the connection URL, not the file. `contracts-governance` would have **under-declared** on `**/ports/**`, letting a DTO or SQL change read as out of scope — the false negative [ADR-0041](docs/adr/ADR-0041-rules-for-paths-declared-territory-with-a-named-match-reason.md)'s own trigger names. `data-orphan-cleanup` says "cron" five times, but as a *cadence*, not a place: the glob would match every scheduled job and miss the orphan condition. `async-post-turn-pipeline` would have matched the code that is already correct and stayed silent on the turn handler where the violation lives. `observability-alert-configuration` shows its own alerts realised three ways, one of them outside the repository.
+- **Two anchors, on a deliverable runward scaffolds itself.** `topology-sovereignty-by-data-class` and `topology-usage-registry-present` now name `execution-topology.md` in their text and declare it as their territory. Naming it prescribes nothing to the client: the shipped mission template already carries the very columns each rule demands — `Sovereignty level` for one, and a `## Usage registry` table matching the other term for term.
+- **A premise corrected along the way.** The usage registry was thought to be missing from the mission layout; it has lived in `execution-topology.md` all along, and runward's own dogfooded mission fills it. The rule's closing sentence is also sharpened: it feeds `runward compliance` **through its conformance row**, never a compliance declaration in itself — the flow was real but indirect, and the text now says which.
+- **Silence can no longer come back.** A test asserts that no shipped rule declares neither `appliesTo:` nor `noTerritory:`, so a rule added later must be ruled on rather than quietly reopening the ambiguity v0.25.0 closed.
+
+Self-gate green: 119 unit tests, smoke OK, OSCAL schema OK.
+
+## v0.25.0 — every rule now says whether it has a territory, or why it has none — 2026-07-31
+
+v0.24.0 shipped `rules --for` with four rules declaring a territory and sixty saying nothing. Saying nothing turned out to be the flaw: a rule nobody had ruled on and a rule that deliberately governs no class of files read exactly alike. That is [ADR-0040](docs/adr/ADR-0040-per-rule-non-scope-declaration.md)'s own lesson — an *undeclared* scope is a weak verifier — applied one level down. This release closes it, and completes the editorial pass over all 64 rules. The deterministic, zero-network gate is unchanged.
+
+- **A declared absence of territory ([ADR-0041](docs/adr/ADR-0041-rules-for-paths-declared-territory-with-a-named-match-reason.md), amended).** `noTerritory: <reason>` states that a rule governs no class of files **and why** — the exact mirror of `nonScope:`, per-rule, optional, prose, with the reason as the valuable part. There are three states now, reported as three: a declared territory · a declared absence, with its reason · not ruled on yet. `runward explain` prints whichever applies, including the third ("an omission, not a scope"). Only the last is a backlog, and only it is meant to reach zero.
+- **The editorial pass, over all 64 rules.** Five parallel readers classified every rule against **its own text**, with the negative decisions treated as first-class results: **12 declare a territory · 45 declare they have none, with a reason · 7 remain unreviewed.** The unreviewed count went from 60 to 7.
+- **It corrected the seeds it inherited.** `config-secrets-boundary` carried `**/secrets/**` and `**/env/**` — conventional patterns appearing **nowhere** in the rule's text; replaced by `**/config.ts`, which the text names. `data-migrations-forward-only` carried `**/migrate/**`, which does not match `scripts/migrate.ts` — the runner the rule itself cites; now `**/migrate.*`.
+- **It refused territories that would have been inferred from a slug.** `process-adr-and-journal` names no ADR directory; `tools-registry-pattern` names no location; `cache-three-tier-architecture` is misleadingly named and governs prompt-prefix stability, not an architecture. Each stays unscoped **by declaration**, with the reason readable.
+- **The seven left unreviewed are a named state, not a remainder.** Each targets a real artifact while its own text prescribes no path, so a glob would be inference presented as an auditable fact. The fix is a sentence anchoring the rule's text — rule authoring, not matching. A test pins the list so it cannot grow in silence, and the ROADMAP carries it.
+
+`unscoped.count` keeps its v0.24.0 meaning; `declaredNoTerritory` and `unreviewed` are additive beside it ([ADR-0024](docs/adr/ADR-0024-machine-surface-of-the-rule-set.md)), and `noTerritory` joins the per-rule contract. Self-gate green: 119 unit tests, smoke OK, OSCAL schema OK.
+
+## v0.24.0 — ask which rules govern this file, and see why — 2026-07-31
+
+`AGENTS.md` has always prescribed confronting the craft rules "at the point of action, not from memory". Until now nothing made that mechanisable: `rules` filtered by phase, and `govern` alone returns twelve. This release ships the primitive the 2026-07-31 field report asked for, and ratifies the two decisions behind it. The deterministic, zero-network gate is unchanged — `--for` is a reading, never a verdict.
+
+- **`runward rules --for <paths>` ([ADR-0041](docs/adr/ADR-0041-rules-for-paths-declared-territory-with-a-named-match-reason.md), ratified and implemented).** Returns the rules whose declared territory covers the given project-relative paths, **with the pattern that retained each one** — the `git check-ignore -v` model, so the answer is auditable rather than magical. Matching is on an optional `appliesTo:` glob list the rule declares, never on `tags:` (thematic, and inferring territory from them would be a heuristic with no reason to render). Paths come from the caller: runward never computes the change set, so the composition is yours — `git diff --name-only "$BASE...HEAD" | xargs runward rules --for`.
+- **A declared glob dialect, and no new dependency.** Five constructs — leading `**/`, trailing `/**`, `**`, `*`, `?` — stated in the machine surface and echoed in `--json`. No braces, no ranges, no negation: a rule author reads the whole grammar in five lines, rather than inheriting semantics nobody in the mission could state. `**/cron/**` matches `cron/x`, `src/cron/x` and `cron`, never `src/cronjob.ts`.
+- **It never pretends to be exhaustive.** Every run reports how many rules declare no territory and were therefore not evaluated, with the standing caveat *surfacing, never masking*. On a fresh rule set that count is most of them, and saying so is the point: a primitive answering "nothing" where it means "I was never told" would be the weak verifier [ADR-0040](docs/adr/ADR-0040-per-rule-non-scope-declaration.md) warns about. **Always exits 0**; exit 2 only when the question cannot be asked (an absolute path, or one escaping the project).
+- **No filesystem access, no git, no model.** Pure string matching, so a path need not exist yet — you can ask *before* writing the file — and nothing depends on the caller's working directory. Windows separators give the same answer as POSIX ones.
+- **Four territories seeded**, on the [ADR-0020](docs/adr/ADR-0020-rule-evidence-signatures.md) "never wholesale" discipline: `async-job-guardrails`, `async-scheduled-maintenance`, `config-secrets-boundary`, `data-migrations-forward-only` — each because the rule's own text is about a specific artifact class. `security-mcp-server-pinning` was considered and left unscoped: its text prescribes no path, so a territory would have been invented. **4 of 64 rules declare a territory**: the primitive is complete, its coverage is not, and the editorial pass is the remaining work.
+- **[ADR-0042](docs/adr/ADR-0042-craft-rule-confrontation-is-continuous-not-a-gate-crossing-ritual.md) ratified**, and `iterate.md` now names `--for` as the precise gesture (its own reopening trigger, followed through), paired with `--phase` since `--for` is not exhaustive.
+
+`rules --json` gains `appliesTo` per rule and, under `--for`, the `selector`, `unscoped` and `matchedBy` fields — additive per [ADR-0024](docs/adr/ADR-0024-machine-surface-of-the-rule-set.md); `port-contract.md` documents the new surface. A regression test pins the case that motivated all of it: the cron and the secret relay that passed a green gate with both rules unread now surface with their patterns. Self-gate green: 116 unit tests, smoke OK, OSCAL schema OK.
+
+## Ratification — the two field-report candidates, decided — 2026-07-31
+
+[ADR-0041](docs/adr/ADR-0041-rules-for-paths-declared-territory-with-a-named-match-reason.md) and [ADR-0042](docs/adr/ADR-0042-craft-rule-confrontation-is-continuous-not-a-gate-crossing-ritual.md) shipped as candidates in v0.23.0, each with a dated trigger governing its ratification. Both are ratified, ahead of their deadlines. **No CLI behaviour changes.**
+
+- **[ADR-0042](docs/adr/ADR-0042-craft-rule-confrontation-is-continuous-not-a-gate-crossing-ritual.md) — accepted, with its implementation already shipped.** The method change (`iterate.md` carries the craft-rule confrontation step) went out in v0.23.0; this ratifies the position behind it: rule confrontation is a continuous obligation of building, not a gate-crossing ritual. The Ratification section records what shipped, what was deliberately left silent (the non-building workflows), and the honest limit — the gesture is coarse until ADR-0041 lands.
+- **[ADR-0041](docs/adr/ADR-0041-rules-for-paths-declared-territory-with-a-named-match-reason.md) — accepted as a direction; nothing is built.** Unlike [ADR-0040](docs/adr/ADR-0040-per-rule-non-scope-declaration.md), which shipped its implementation the day it was ratified, this one commits to work that does not exist yet, and its Ratification section says so plainly. It settles the design so the implementation re-litigates nothing (the rule file is the carrier; matching is on declared territory only, never on thematic tags; the match reason is rendered; unscoped rules are counted; always exit 0; runward never computes the change set) and names what stays open (which rules get `appliesTo` first, the glob dialect, the monorepo resolution base).
+- **ROADMAP re-groomed**: `Next` now carries the implementation of ADR-0041 rather than the choice to make.
+
+## v0.23.0 — a green row does not travel forward in time — 2026-07-31
+
+A field report from a mission built with runward: two mapped craft rules — `async-job-guardrails` (HIGH) and `config-secrets-boundary` (CRITICAL) — violated in one afternoon, on code the agent had just written itself, with `check --strict` green from start to finish. The gate behaved exactly as declared. What the report exposed is that the declaration was incomplete, and that the method stops talking about the craft rules precisely where most of a product's code gets written. Investigated by a four-agent read (adversarial fact-checking against the code, ADR-corpus constraint analysis, external prior-art survey, feasibility mapping). The deterministic, zero-network gate is unchanged.
+
+- **The gate's temporal blind zone, declared.** `GATE_NON_SCOPE` ([ADR-0040](docs/adr/ADR-0040-per-rule-non-scope-declaration.md)) named the *depth* blind zone — a green row never proves the evidence implements the rule — and was silent on the *temporal* one: the operator's judgment was made about the code that existed when the row was written, and nothing re-judges code added later under an already-accounted-for rule. Every run still re-verifies that cited pointers resolve and that sealed evidence has not drifted; the semantic judgment is what does not travel. ADR-0040 was in default of its own standard ("every gate names what it cannot verify"); it no longer is. Read it in full with `runward explain <rule>`.
+- **Craft-rule confrontation is continuous, not a crossing ritual ([ADR-0042](docs/adr/ADR-0042-craft-rule-confrontation-is-continuous-not-a-gate-crossing-ritual.md), candidate).** The coupling was empirical, not assumed: across the eleven shipped workflows the craft rules were named in `architect`/`floor`/`govern`/`handover` — the manifest-bearing ones — plus `verify`, and nowhere else, while `AGENTS.md` prescribes confronting them "while building, at the point of action, not from memory". `iterate.md` now carries the step in the gated workflows' own form, with the gesture available today (`runward rules --phase <phase>`) and no wait on the matcher below. Accounting rides the artifact `iterate` already mandates — the ADR that locks a switch names the rules confronted; ordinary maintenance is a reading discipline with no artifact, and the step says so, as it says that `check --strict` verifies none of it. Missions pick it up with `runward update`.
+- **`rules --phase <unknown>` is misuse now, not an empty answer.** It returned zero rules and exit 0 — in a CI step, indistinguishable from "nothing applies here". It exits 2 and names the gated phases, derived from `GATED_DELIVERABLES`. The `--phase` help was stale too (it omitted `handover`, gated since [ADR-0026](docs/adr/ADR-0026-handover-as-a-gated-conformance-phase.md)); it is derived from the same single source, so a new gated phase can never be missing from it again.
+- **A matching primitive, decided but not built ([ADR-0041](docs/adr/ADR-0041-rules-for-paths-declared-territory-with-a-named-match-reason.md), candidate).** `runward rules --for <paths>` would make "confront at the point of action" mechanisable, matching on an optional `appliesTo:` glob list — a territory the rule *declares* — never on `tags:`, which are thematic and would make the correspondence an implicit heuristic. The matched pattern is rendered on the `git check-ignore -v` model, unscoped rules are counted and reported, and it always exits 0. Nothing ships until it is ratified.
+- **Two refusals, on the record with their citations.** A gated Iterate deliverable is rejected by name in [ADR-0033](docs/adr/ADR-0033-status-reports-real-lifecycle-position-state-and-reopenings.md) (permanent red on every mature mission, or false completion). `check --changed <base>` would put a mutable, third-party-writable git ref in the exit-code path against the port contract's "same working tree ⇒ same verdict", is neutralisable by a `fetch-depth: 1`, and would be the second gate the doctrine denies. runward never computes the change set itself: paths come from the caller ([ADR-0039](docs/adr/ADR-0039-the-operator-layer-stays-outside-the-cli.md)). The operator composes — `runward rules --for $(git diff --name-only)` to inform, `check --hooks` to block ([ADR-0008](docs/adr/ADR-0008-opt-in-hook-seam-around-check.md)).
+- **Also carries the 2026-07-29 ratification below** — the six brownfield/characterize ADRs (0033–0038) moved to `accepted` with typed evidence pointers, plus the test hardening that preceded them. That work was committed as governance, without a release; this is the release it reaches.
+
+`port-contract.md` is realigned with the code (`rules --json` carries `tags`, `nonScope`, and the `gateNonScope` envelope field). Guards: +1 unit, +2 smoke. Self-gate green: 110 unit tests, smoke OK, OSCAL schema OK.
+
+## Ratification — the brownfield/characterize ADRs, status catches up to code — 2026-07-29
+
+Six ADRs from the 2026-07-20 resume-existing (brownfield) audit — [ADR-0033](docs/adr/ADR-0033-status-reports-real-lifecycle-position-state-and-reopenings.md) (`status` names the iterate steady-state and the reopening watch) and [ADR-0034](docs/adr/ADR-0034-characterize-sees-the-whole-tree-monorepos-and-deterministic-ordering.md)–[ADR-0038](docs/adr/ADR-0038-mine-across-languages-groups-by-family-and-never-resurrects-a-ratified-draft.md) (`characterize` sees the whole tree, extracts pinned versions offline, reports churn/bus-factor, detects infra & framework/DB signals, mines dependency families) — shipped across past releases and have run under test on `main`, yet their status stayed `proposed`. That is the doc↔code drift the gate condemns, inverted: the code was ahead of its own decision record. This entry closes it. **No CLI behaviour changes.**
+
+- **Ratified, with evidence.** Each of the six ADRs moves to `accepted (ratified 2026-07-29 — see Ratification)` and gains a `## Ratification` section carrying typed evidence pointers (`file:…#symbol`, `test:…`) to the shipped implementation and its tests, on the [ADR-0040](docs/adr/ADR-0040-per-rule-non-scope-declaration.md) model.
+- **Proof hardened first.** Three status/mission unit tests added (byte-stable trigger sort across ADRs; the `**Trigger set on**` line never taken as preview prose; `analyze().steadyState` false on an incomplete mission) and two `characterize` smoke assertions (a nested sub-package surfaced end-to-end, ADR-0034; pinned versions extracted from the lockfile offline, ADR-0035) — the two ADRs that had unit coverage only. Self-gate green; 109 unit tests.
+- **Honest scope note.** Ratifying the product ADRs under `docs/adr/` does not change `runward status` output: its reopening watch reads the *mission's* decision journal (`runward/adr/`), not the product ADRs. This is a governance act, not a behavioural one.
 
 ## v0.22.0 — every gate names what it cannot verify — 2026-07-21
 

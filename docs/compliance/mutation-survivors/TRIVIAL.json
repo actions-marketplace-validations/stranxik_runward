@@ -1,0 +1,24 @@
+{
+ "function": "TRIVIAL",
+ "probeMissions": [],
+ "verdicts": [
+  {
+   "key": "26|24|26|32|MethodExpression|s",
+   "line": 26,
+   "mutator": "MethodExpression",
+   "filing": "equivalent",
+   "evidence": "TRIVIAL's only call site passes `why`, which is `rest.join(\" | \").trim()`, so its argument is already trimmed and String#trim is idempotent. Measured: 1008 padded values over twelve whitespace code points (including NBSP, U+2009, ideographic space and BOM) show zero non-idempotent trim, and the whole 60-fixture probe plus the CLI JSON are byte-identical.",
+   "argument": "TRIVIAL's only call site passes `why`, which is `rest.join(\" | \").trim()`, so its argument is already trimmed and String#trim is idempotent. Measured: 1008 padded values over twelve whitespace code points (including NBSP, U+2009, ideographic space and BOM) show zero non-idempotent trim, and the whole 60-fixture probe plus the CLI JSON are byte-identical.",
+   "stableKey": "territory-map\u0001TRIVIAL\u0001MethodExpression\u0001s\u0001s.trim()\u0001const TRIVIAL = (s) => s.trim().length < 8 || /^\\[.*\\]$/.test(s.trim());"
+  },
+  {
+   "key": "26|63|26|71|MethodExpression|s",
+   "line": 26,
+   "mutator": "MethodExpression",
+   "filing": "equivalent",
+   "evidence": "Second occurrence of the same idempotence: TRIVIAL is called only with `why`, itself the result of `.trim()`, so `/^\\[.*\\]$/.test(s.trim())` and `.test(s)` receive the same string. Measured: 1008 padded values across twelve whitespace code points show zero non-idempotent trim, and the 60-fixture module probe plus the `rules --for --json` and `status` output are byte-identical.",
+   "argument": "Second occurrence of the same idempotence: TRIVIAL is called only with `why`, itself the result of `.trim()`, so `/^\\[.*\\]$/.test(s.trim())` and `.test(s)` receive the same string. Measured: 1008 padded values across twelve whitespace code points show zero non-idempotent trim, and the 60-fixture module probe plus the `rules --for --json` and `status` output are byte-identical.",
+   "stableKey": "territory-map\u0001TRIVIAL\u0001MethodExpression\u0001s\u0001s.trim()\u0001const TRIVIAL = (s) => s.trim().length < 8 || /^\\[.*\\]$/.test(s.trim());\u0001#2"
+  }
+ ]
+}

@@ -22,7 +22,7 @@ craft rule (versioned, ASI-mapped)                 runward/rules/<slug>.md
   → OSCAL implemented-requirement                   oscal-component-definition.json
 ```
 
-- A **craft rule** declares its OWASP ASI mapping in frontmatter: `asi: [ASI01, …]` — values match `/^ASI\d{2}$/` after uppercasing; anything else is ignored.
+- A **craft rule** declares its OWASP ASI mapping in frontmatter: `asi: [ASI01, …]` — values match `/^ASI\d{2}$/` after uppercasing; anything else is ignored. A CRITICAL/HIGH rule with no honest ASI category declares `noAsi: <reason>` instead (ADR-0009 amendment, 2026-08-17): the coverage a pack reports counts MAPPED rules only, so a rule outside the attack taxonomy never inflates it. Silence is neither — a test refuses a CRITICAL/HIGH rule carrying neither field.
 - A **gated deliverable** carries a `## Rule conformance` markdown table with columns `Rule | Status | Evidence`. Statuses are exactly `applied`, `deviated`, `n/a`. As of runward v0.16, the gated (phase, deliverable) pairs are: `architect → architecture.md`, `topology → execution-topology.md`, `floor → floor.md`, `govern → governance/threat-model.md`, `handover → handover.md`.
 - The gate (`runward check --strict`) verifies the manifests **and the evidence's shape** before the pack is credible: typed pointers resolve to real, non-empty content; signed rules match their signature; stale pointers fail; an optional seal (`evidence-lock.json`, §6) hashes the evidence at crossing time.
 
@@ -69,10 +69,12 @@ The control set is the **OWASP Top 10 for Agentic Applications** (ASI01–ASI10)
 | Condition | `implementation-status` |
 |---|---|
 | No rule maps this category | `planned` — an unaddressed risk is a gap, stated as one |
-| At least one mapped rule has a manifest row, and **every** row found (across all deliverables) is `applied` | `implemented` |
-| Anything else (any `deviated` or `n/a` row, or mapped rules not yet in any manifest) | `partial` |
+| At least one mapped rule has a manifest row, **every** row found (across all deliverables) is `applied`, the gate accepted under `--strict`, and no contributing row rests on prose | `implemented` |
+| Anything else (any `deviated` or `n/a` row, mapped rules not yet in any manifest, a gate that refuses, or evidence that is prose) | `partial` |
 
-Note the honest asymmetry: mapping a rule without accounting for it yields `partial`, never `implemented` — paper coverage does not upgrade the status.
+Note the honest asymmetry: mapping a rule without accounting for it yields `partial`, never `implemented` — paper coverage does not upgrade the status. `implemented` also requires the gate to have RUN and accepted, and requires every contributing row to carry evidence the gate opened: a row reads `applied` whether the gate checked a pointer or accepted a sentence on the operator's judgment (ADR-0004), and a control resting on a sentence is `partial` (RWD-2026-0058). Each requirement carries `runward-evidence-depth` naming which of its rules rest on prose.
+
+**`planned` does not occur on a mission using the shipped corpus, and that is arithmetic, not an accident.** All 64 rules runward ships map, between them, to every one of the ten ASI categories (measured: the thinnest are ASI05 and ASI07 with one rule each), so no category is ever unmapped and the first row of this table never fires. It exists for a corpus that does NOT cover a category — an organisation vendoring its own rules under [ADR-0057](../adr/ADR-0057-the-shared-corpus-is-pinned-without-a-registry.md) — and reaching it by deleting a shipped rule instead makes `check --strict` refuse the mission for corpus divergence. A reader must not take the three-state scale as three states this pack will actually show them.
 
 ## 4. The regime lens
 

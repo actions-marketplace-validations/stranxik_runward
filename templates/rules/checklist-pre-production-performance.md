@@ -1,8 +1,11 @@
 ---
 title: Pre-Production Performance Checklist
+noAsi: performance readiness; no agentic-security surface.
+phases: [govern]
 impact: HIGH
 impactDescription: Ensures application performs well under production load
 tags: [checklist, performance, production, deployment]
+noTerritory: A pre-production checklist is a gate on the system as a whole, not on a class of files: it is confronted at the crossing, not while editing any particular path.
 ---
 
 ## Pre-Production Performance Checklist
@@ -11,13 +14,13 @@ Performance items to validate before production deployment.
 
 ```
 PERFORMANCE CHECKLIST
-├── [ ] LLM cache 3-tier implemented
-├── [ ] Smart routing active (Fast/Balanced/Deep)
+├── [ ] Prompt caching evaluated — enabled only where measured cost justifies it (see cache-three-tier-architecture: a cost lever, not a principle)
+├── [ ] Model routing evaluated — tiered routing (Fast/Balanced/Deep) only on a measured trigger, single tier is the sober default
 ├── [ ] DB connection pooling configured
 ├── [ ] DB queries indexed (check slow query log)
 ├── [ ] Frontend assets optimized (images, bundle) if a UI is served
 ├── [ ] Code splitting enabled
-├── [ ] Bundle size analyzed (<500KB initial)
+├── [ ] Bundle size analyzed (<500KB initial — a starting point, not calibrated truth: recalibrate the numeric targets in this checklist against your real traffic)
 ├── [ ] API response times measured (<200ms P95 for non-LLM)
 └── [ ] Load testing completed
 ```

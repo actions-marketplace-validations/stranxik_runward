@@ -1,8 +1,11 @@
 ---
 title: Pre-Production Observability Checklist
+noAsi: observability readiness, not an attack category. Detection of a misbehaving agent rests on the governance rules that declare what must be observable.
+phases: [govern]
 impact: HIGH
 impactDescription: Ensures you can monitor and debug production issues
 tags: [checklist, observability, production, deployment]
+noTerritory: A pre-production checklist is a gate on the system as a whole, not on a class of files: it is confronted at the crossing, not while editing any particular path.
 ---
 
 ## Pre-Production Observability Checklist
